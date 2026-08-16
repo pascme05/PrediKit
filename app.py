@@ -244,47 +244,108 @@ class ModelTrainer:
         return X, y
     
     def _extract_image_features(self, df, image_folder):
-        """Extract image features from dataframe with image names"""
+        """Extract image features from dataframe with image names - ROBUST VERSION"""
         print("=== EXTRACTING IMAGE FEATURES ===")
+        print(f"Image folder: {image_folder}")
         
         if self.image_extractor is None:
             self.image_extractor = ImageFeatureExtractor('resnet50')
         
+        # Get the image name column (second column)
         image_col = df.columns[1]
+        print(f"Image column: {image_col}")
+        
         image_names = df[image_col].tolist()
+        print(f"Looking for {len(image_names)} images")
+        print(f"Sample image names: {image_names[:5]}")
+        
+        # Check if image folder exists
+        if not os.path.exists(image_folder):
+            print(f"ERROR: Image folder does not exist: {image_folder}")
+            raise ValueError(f"Image folder not found: {image_folder}")
+        
+        # List all files in the image folder recursively
+        all_files = []
+        for root, dirs, files in os.walk(image_folder):
+            for file in files:
+                rel_path = os.path.relpath(os.path.join(root, file), image_folder)
+                all_files.append(rel_path)
+        
+        print(f"Total files in folder: {len(all_files)}")
+        print(f"Sample files: {all_files[:10]}")
+        
+        # Build a lookup dictionary of all image files (without extension)
+        file_lookup = {}
+        for file_path in all_files:
+            # Get the base name without extension
+            base_name = os.path.splitext(file_path)[0]
+            # Also get just the filename without path
+            file_name_only = os.path.basename(file_path)
+            file_name_no_ext = os.path.splitext(file_name_only)[0]
+            
+            # Store both the full path and the filename
+            file_lookup[file_name_no_ext] = file_path
+            file_lookup[file_name_only] = file_path
+            # Also store with lowercase for case-insensitive matching
+            file_lookup[file_name_no_ext.lower()] = file_path
+            file_lookup[file_name_only.lower()] = file_path
+        
+        print(f"Built lookup with {len(file_lookup)} entries")
         
         image_paths = []
         valid_indices = []
+        missing_images = []
         
         for i, name in enumerate(image_names):
             name_str = str(name).strip()
             found = False
-            for ext in ['', '.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']:
-                path = os.path.join(image_folder, name_str + ext)
-                if os.path.exists(path):
-                    image_paths.append(path)
+            
+            # Try different variations
+            variations = [
+                name_str,  # Original
+                name_str.lower(),  # Lowercase
+                os.path.basename(name_str),  # Just filename
+                os.path.splitext(name_str)[0],  # Without extension
+                os.path.splitext(name_str)[0].lower(),  # Without extension, lowercase
+            ]
+            
+            for var in variations:
+                if var in file_lookup:
+                    full_path = os.path.join(image_folder, file_lookup[var])
+                    image_paths.append(full_path)
                     valid_indices.append(i)
                     found = True
                     break
+            
             if not found:
-                print(f"Warning: Image not found: {name_str}")
+                missing_images.append(name_str)
         
         if not image_paths:
+            print(f"ERROR: No images found for any of the image names")
+            print(f"Expected image names: {image_names[:10]}")
+            print(f"Available files: {all_files[:10]}")
             raise ValueError(f"No images found in {image_folder}. Check image names and folder.")
         
         print(f"Found {len(image_paths)} images out of {len(image_names)} samples")
+        if missing_images:
+            print(f"Missing images: {missing_images[:5]}...")
         
+        # Extract features
+        print("Extracting features...")
         features, valid_paths = self.image_extractor.extract_features_batch(image_paths)
         
         if len(features) == 0:
             raise ValueError("Failed to extract features from any images")
         
+        # Update dataframe with only valid images
         valid_df = df.iloc[valid_indices].copy()
         valid_df['image_path'] = valid_paths
         
+        # Convert features to dataframe
         feature_names = [f'feat_{i}' for i in range(features.shape[1])]
         feature_df = pd.DataFrame(features, columns=feature_names, index=valid_df.index)
         
+        # Combine with original dataframe (keep sample ID and target)
         result_df = pd.concat([valid_df[[df.columns[0], df.columns[-1]]], feature_df], axis=1)
         
         if result_df.isna().sum().sum() > 0:
@@ -292,6 +353,7 @@ class ModelTrainer:
             result_df = result_df.fillna(0)
         
         print(f"Extracted {features.shape[1]} features from {len(valid_paths)} images")
+        print(f"Result shape: {result_df.shape}")
         
         return result_df, feature_names
     
@@ -1057,6 +1119,59 @@ def download_predictions():
         print(f"Download error: {str(e)}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/debug_images', methods=['POST'])
+def debug_images():
+    """Debug endpoint to check image loading"""
+    import zipfile
+    import tempfile
+    
+    if 'images' not in request.files:
+        return jsonify({'error': 'No image file uploaded'}), 400
+    
+    image_file = request.files['images']
+    if image_file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    # Save and extract the ZIP
+    zip_path = os.path.join(app.config['UPLOAD_FOLDER'], 'debug_' + secure_filename(image_file.filename))
+    image_file.save(zip_path)
+    
+    # Extract to temp folder
+    debug_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'debug_images')
+    os.makedirs(debug_folder, exist_ok=True)
+    
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(debug_folder)
+    
+    # Get list of files
+    all_files = []
+    for root, dirs, files in os.walk(debug_folder):
+        for file in files:
+            all_files.append(os.path.relpath(os.path.join(root, file), debug_folder))
+    
+    # Also check the Excel file to see what image names are expected
+    excel_file = request.files.get('file')
+    if excel_file:
+        excel_path = os.path.join(app.config['UPLOAD_FOLDER'], 'debug_' + secure_filename(excel_file.filename))
+        excel_file.save(excel_path)
+        
+        try:
+            df_train = pd.read_excel(excel_path, sheet_name='Train')
+            image_names = df_train.iloc[:, 1].tolist()
+        except:
+            image_names = []
+    else:
+        image_names = []
+    
+    return jsonify({
+        'zip_extracted_to': debug_folder,
+        'total_files': len(all_files),
+        'sample_files': all_files[:20],
+        'expected_image_names': image_names[:20],
+        'file_extensions': list(set([os.path.splitext(f)[1] for f in all_files])),
+        'has_subfolder': any('/' in f for f in all_files)
+    })
 
 @app.route('/clear', methods=['POST'])
 def clear_data():
