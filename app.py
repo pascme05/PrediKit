@@ -706,13 +706,15 @@ class ModelTrainer:
                 X_eval = data_store['X_test'].copy()
                 y_true = data_store['y_test']
                 self.eval_type = 'test'
-                eval_message = "Evaluation using Test Set"
+                eval_message = "✅ Evaluation using Test Set"
+                eval_color = 'green'
             else:
                 print("Using VALIDATION set for evaluation (test has no labels)")
                 X_eval = data_store['X_val'].copy()
                 y_true = data_store['y_val']
                 self.eval_type = 'validation'
                 eval_message = "⚠️ Test set has no ground truth. Evaluation using Validation Set"
+                eval_color = 'orange'
             
             # Clean evaluation data
             if X_eval.isna().sum().sum() > 0:
@@ -727,6 +729,7 @@ class ModelTrainer:
             
             y_pred = self.model.predict(X_eval_scaled)
             
+            # Store predictions
             if use_test:
                 data_store['test_predictions'] = y_pred
                 data_store['test_sample_ids'] = data_store['test_sample_ids']
@@ -746,16 +749,19 @@ class ModelTrainer:
                 report = classification_report(y_true, y_pred, output_dict=True)
                 conf_matrix = confusion_matrix(y_true, y_pred)
                 
-                fig, ax = plt.subplots(figsize=(8, 6))
+                fig, ax = plt.subplots(figsize=(10, 8))
                 sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', ax=ax)
                 ax.set_xlabel('Predicted')
                 ax.set_ylabel('True')
-                ax.set_title(f'Confusion Matrix - {self.eval_type.capitalize()} Set')
                 
-                # Add subtitle if using validation
+                # Add title with evaluation type
                 if self.eval_type == 'validation':
-                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set', 
-                               ha='center', fontsize=10, color='orange')
+                    ax.set_title(f'Confusion Matrix - Validation Set ⚠️', fontsize=14, fontweight='bold')
+                    # Add subtitle
+                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set for evaluation', 
+                            ha='center', fontsize=11, color='orange', style='italic')
+                else:
+                    ax.set_title(f'Confusion Matrix - Test Set', fontsize=14, fontweight='bold')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -785,30 +791,90 @@ class ModelTrainer:
                 mae = mean_absolute_error(y_true_clean, y_pred_clean)
                 r2 = r2_score(y_true_clean, y_pred_clean)
                 
-                # Line plot
-                fig, ax = plt.subplots(figsize=(10, 6))
+                # Create a figure with 3 subplots for better visualization
+                fig = plt.figure(figsize=(14, 10))
+                
+                # 1. Line Plot: Predictions vs Actual
+                ax1 = plt.subplot(2, 2, 1)
                 sorted_idx = np.argsort(y_true_clean)
                 y_true_sorted = y_true_clean[sorted_idx]
                 y_pred_sorted = y_pred_clean[sorted_idx]
                 
+                ax1.plot(range(len(y_true_sorted)), y_true_sorted, 'b-', label='Actual', linewidth=2)
+                ax1.plot(range(len(y_pred_sorted)), y_pred_sorted, 'r--', label='Predicted', linewidth=2)
+                ax1.set_xlabel('Sample Index')
+                ax1.set_ylabel('Value')
+                if self.eval_type == 'validation':
+                    ax1.set_title('Predictions vs Actual - Validation Set ⚠️', fontsize=12, fontweight='bold')
+                else:
+                    ax1.set_title('Predictions vs Actual - Test Set', fontsize=12, fontweight='bold')
+                ax1.legend()
+                ax1.grid(True, alpha=0.3)
+                
+                # 2. Scatter Plot
+                ax2 = plt.subplot(2, 2, 2)
+                ax2.scatter(y_true_clean, y_pred_clean, alpha=0.6)
+                ax2.plot([y_true_clean.min(), y_true_clean.max()], 
+                        [y_true_clean.min(), y_true_clean.max()], 'r--', lw=2)
+                ax2.set_xlabel('Actual Values')
+                ax2.set_ylabel('Predicted Values')
+                if self.eval_type == 'validation':
+                    ax2.set_title('Scatter Plot - Validation Set ⚠️', fontsize=12, fontweight='bold')
+                else:
+                    ax2.set_title('Scatter Plot - Test Set', fontsize=12, fontweight='bold')
+                ax2.grid(True, alpha=0.3)
+                
+                # 3. Residual Plot
+                ax3 = plt.subplot(2, 2, 3)
+                residuals = y_true_clean - y_pred_clean
+                ax3.scatter(y_pred_clean, residuals, alpha=0.6)
+                ax3.axhline(y=0, color='r', linestyle='--', lw=2)
+                ax3.set_xlabel('Predicted Values')
+                ax3.set_ylabel('Residuals')
+                if self.eval_type == 'validation':
+                    ax3.set_title('Residual Plot - Validation Set ⚠️', fontsize=12, fontweight='bold')
+                else:
+                    ax3.set_title('Residual Plot - Test Set', fontsize=12, fontweight='bold')
+                ax3.grid(True, alpha=0.3)
+                
+                # 4. Error Distribution
+                ax4 = plt.subplot(2, 2, 4)
+                ax4.hist(residuals, bins=20, edgecolor='black', alpha=0.7)
+                ax4.axvline(x=0, color='r', linestyle='--', lw=2)
+                ax4.set_xlabel('Residuals')
+                ax4.set_ylabel('Frequency')
+                if self.eval_type == 'validation':
+                    ax4.set_title('Error Distribution - Validation Set ⚠️', fontsize=12, fontweight='bold')
+                else:
+                    ax4.set_title('Error Distribution - Test Set', fontsize=12, fontweight='bold')
+                ax4.grid(True, alpha=0.3)
+                
+                # Add overall note if using validation
+                if self.eval_type == 'validation':
+                    plt.figtext(0.5, 0.02, '⚠️ Test set has no ground truth - using Validation set for evaluation', 
+                            ha='center', fontsize=12, color='orange', style='italic')
+                
+                plt.tight_layout()
+                
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                buf.seek(0)
+                combined_plot_img = base64.b64encode(buf.getvalue()).decode('utf-8')
+                plt.close()
+                
+                # Also create individual plots for backward compatibility
+                # Line plot
+                fig, ax = plt.subplots(figsize=(10, 6))
                 ax.plot(range(len(y_true_sorted)), y_true_sorted, 'b-', label='Actual', linewidth=2)
                 ax.plot(range(len(y_pred_sorted)), y_pred_sorted, 'r--', label='Predicted', linewidth=2)
                 ax.set_xlabel('Sample Index')
                 ax.set_ylabel('Value')
-                
-                # Title with clear indication
                 if self.eval_type == 'validation':
-                    ax.set_title(f'Predictions vs Actual - Validation Set ⚠️ (Test has no ground truth)')
+                    ax.set_title('Predictions vs Actual - Validation Set ⚠️', fontsize=12, fontweight='bold')
                 else:
-                    ax.set_title(f'Predictions vs Actual - {self.eval_type.capitalize()} Set')
-                
+                    ax.set_title('Predictions vs Actual - Test Set', fontsize=12, fontweight='bold')
                 ax.legend()
                 ax.grid(True, alpha=0.3)
-                
-                # Add note if using validation
-                if self.eval_type == 'validation':
-                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set for evaluation', 
-                               ha='center', fontsize=10, color='orange')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -819,20 +885,15 @@ class ModelTrainer:
                 # Scatter plot
                 fig, ax = plt.subplots(figsize=(8, 6))
                 ax.scatter(y_true_clean, y_pred_clean, alpha=0.6)
-                ax.plot([y_true_clean.min(), y_true_clean.max()], [y_true_clean.min(), y_true_clean.max()], 'r--', lw=2)
+                ax.plot([y_true_clean.min(), y_true_clean.max()], 
+                        [y_true_clean.min(), y_true_clean.max()], 'r--', lw=2)
                 ax.set_xlabel('Actual Values')
                 ax.set_ylabel('Predicted Values')
-                
                 if self.eval_type == 'validation':
-                    ax.set_title(f'Scatter Plot - Validation Set ⚠️ (Test has no ground truth)')
+                    ax.set_title('Scatter Plot - Validation Set ⚠️', fontsize=12, fontweight='bold')
                 else:
-                    ax.set_title(f'Scatter Plot - {self.eval_type.capitalize()} Set')
-                
+                    ax.set_title('Scatter Plot - Test Set', fontsize=12, fontweight='bold')
                 ax.grid(True, alpha=0.3)
-                
-                if self.eval_type == 'validation':
-                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set', 
-                               ha='center', fontsize=10, color='orange')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -841,23 +902,16 @@ class ModelTrainer:
                 plt.close()
                 
                 # Residual plot
-                residuals = y_true_clean - y_pred_clean
                 fig, ax = plt.subplots(figsize=(8, 6))
                 ax.scatter(y_pred_clean, residuals, alpha=0.6)
                 ax.axhline(y=0, color='r', linestyle='--', lw=2)
                 ax.set_xlabel('Predicted Values')
                 ax.set_ylabel('Residuals')
-                
                 if self.eval_type == 'validation':
-                    ax.set_title(f'Residual Plot - Validation Set ⚠️ (Test has no ground truth)')
+                    ax.set_title('Residual Plot - Validation Set ⚠️', fontsize=12, fontweight='bold')
                 else:
-                    ax.set_title(f'Residual Plot - {self.eval_type.capitalize()} Set')
-                
+                    ax.set_title('Residual Plot - Test Set', fontsize=12, fontweight='bold')
                 ax.grid(True, alpha=0.3)
-                
-                if self.eval_type == 'validation':
-                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set', 
-                               ha='center', fontsize=10, color='orange')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -873,6 +927,7 @@ class ModelTrainer:
                     'rmse': rmse,
                     'mae': mae,
                     'r2': r2,
+                    'combined_plot_img': combined_plot_img,
                     'line_plot_img': line_plot_img,
                     'scatter_img': scatter_img,
                     'residuals_img': residuals_img,
