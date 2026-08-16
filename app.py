@@ -244,16 +244,27 @@ class ModelTrainer:
         return X, y
     
     def _extract_image_features(self, df, image_folder):
-        """Extract image features from dataframe with image names - ROBUST VERSION"""
+        """Extract image features from dataframe with image names - FIXED"""
         print("=== EXTRACTING IMAGE FEATURES ===")
         print(f"Image folder: {image_folder}")
+        print(f"DataFrame shape: {df.shape}")
+        print(f"DataFrame columns: {df.columns.tolist()}")
         
         if self.image_extractor is None:
             self.image_extractor = ImageFeatureExtractor('resnet50')
         
         # Get the image name column (second column)
         image_col = df.columns[1]
+        target_col = df.columns[-1]  # Last column is target
+        sample_id_col = df.columns[0]  # First column is sample ID
+        
+        print(f"Sample ID column: {sample_id_col}")
         print(f"Image column: {image_col}")
+        print(f"Target column: {target_col}")
+        
+        # Store the target values separately BEFORE extracting features
+        target_values = df[target_col].copy()
+        sample_ids = df[sample_id_col].copy()
         
         image_names = df[image_col].tolist()
         print(f"Looking for {len(image_names)} images")
@@ -274,19 +285,15 @@ class ModelTrainer:
         print(f"Total files in folder: {len(all_files)}")
         print(f"Sample files: {all_files[:10]}")
         
-        # Build a lookup dictionary of all image files (without extension)
+        # Build a lookup dictionary of all image files
         file_lookup = {}
         for file_path in all_files:
-            # Get the base name without extension
             base_name = os.path.splitext(file_path)[0]
-            # Also get just the filename without path
             file_name_only = os.path.basename(file_path)
             file_name_no_ext = os.path.splitext(file_name_only)[0]
             
-            # Store both the full path and the filename
             file_lookup[file_name_no_ext] = file_path
             file_lookup[file_name_only] = file_path
-            # Also store with lowercase for case-insensitive matching
             file_lookup[file_name_no_ext.lower()] = file_path
             file_lookup[file_name_only.lower()] = file_path
         
@@ -300,13 +307,12 @@ class ModelTrainer:
             name_str = str(name).strip()
             found = False
             
-            # Try different variations
             variations = [
-                name_str,  # Original
-                name_str.lower(),  # Lowercase
-                os.path.basename(name_str),  # Just filename
-                os.path.splitext(name_str)[0],  # Without extension
-                os.path.splitext(name_str)[0].lower(),  # Without extension, lowercase
+                name_str,
+                name_str.lower(),
+                os.path.basename(name_str),
+                os.path.splitext(name_str)[0],
+                os.path.splitext(name_str)[0].lower(),
             ]
             
             for var in variations:
@@ -337,16 +343,20 @@ class ModelTrainer:
         if len(features) == 0:
             raise ValueError("Failed to extract features from any images")
         
-        # Update dataframe with only valid images
-        valid_df = df.iloc[valid_indices].copy()
-        valid_df['image_path'] = valid_paths
+        # Get the corresponding target values and sample IDs for valid images
+        valid_targets = target_values.iloc[valid_indices].reset_index(drop=True)
+        valid_sample_ids = sample_ids.iloc[valid_indices].reset_index(drop=True)
         
         # Convert features to dataframe
         feature_names = [f'feat_{i}' for i in range(features.shape[1])]
-        feature_df = pd.DataFrame(features, columns=feature_names, index=valid_df.index)
+        feature_df = pd.DataFrame(features, columns=feature_names)
         
-        # Combine with original dataframe (keep sample ID and target)
-        result_df = pd.concat([valid_df[[df.columns[0], df.columns[-1]]], feature_df], axis=1)
+        # Combine: Sample ID, Target, Features
+        result_df = pd.DataFrame({
+            sample_id_col: valid_sample_ids,
+            target_col: valid_targets
+        })
+        result_df = pd.concat([result_df, feature_df], axis=1)
         
         if result_df.isna().sum().sum() > 0:
             print("WARNING: NaN in extracted features, filling with 0")
@@ -354,6 +364,7 @@ class ModelTrainer:
         
         print(f"Extracted {features.shape[1]} features from {len(valid_paths)} images")
         print(f"Result shape: {result_df.shape}")
+        print(f"Result columns: {result_df.columns.tolist()[:5]}... (showing first 5)")
         
         return result_df, feature_names
     
@@ -370,6 +381,7 @@ class ModelTrainer:
                 if sheet not in sheet_names:
                     raise ValueError(f"Required worksheet '{sheet}' not found. Found: {sheet_names}")
             
+            # Load data
             train_df = pd.read_excel(xlsx_file, sheet_name='Train')
             train_df = self._handle_missing_values(train_df, "Train")
             
@@ -389,13 +401,14 @@ class ModelTrainer:
                 print(f"Processing as IMAGE CLASSIFICATION task. Image folder: {image_folder}")
                 self.image_folder = image_folder
                 
+                # Extract image features - this returns (sample_id, target, features...)
                 train_df, feature_names = self._extract_image_features(train_df, image_folder)
                 val_df, _ = self._extract_image_features(val_df, image_folder)
                 test_df, _ = self._extract_image_features(test_df, image_folder)
                 
                 self.feature_names = feature_names
                 self.sample_id_col = train_df.columns[0]
-                self.target_name = train_df.columns[-1]
+                self.target_name = train_df.columns[1]  # Target is now the second column
             else:
                 self.sample_id_col = train_df.columns[0]
                 feature_cols = train_df.columns[1:-1].tolist()
@@ -404,25 +417,29 @@ class ModelTrainer:
                 
                 print(f"Processing as TABULAR data. Features: {self.feature_names}")
             
+            # Extract features and target
             if self.is_image_task:
-                X_train = train_df.iloc[:, 2:-1]
-                y_train = train_df.iloc[:, -1]
+                # For image tasks: columns are [Sample ID, Target, Features...]
+                X_train = train_df.iloc[:, 2:]  # All columns after Target (index 2)
+                y_train = train_df.iloc[:, 1]   # Target is at index 1
                 
-                X_val = val_df.iloc[:, 2:-1]
-                y_val = val_df.iloc[:, -1]
+                X_val = val_df.iloc[:, 2:]
+                y_val = val_df.iloc[:, 1]
                 
+                # Test data
                 test_cols = test_df.shape[1]
-                if test_cols > 3:
+                if test_cols > 2:  # Has target column
                     self.has_test_labels = True
-                    X_test = test_df.iloc[:, 2:-1]
-                    y_test = test_df.iloc[:, -1]
+                    X_test = test_df.iloc[:, 2:]
+                    y_test = test_df.iloc[:, 1]
                     test_sample_ids = test_df.iloc[:, 0]
                 else:
                     self.has_test_labels = False
-                    X_test = test_df.iloc[:, 2:]
+                    X_test = test_df.iloc[:, 1:]  # Only features (no target)
                     y_test = None
                     test_sample_ids = test_df.iloc[:, 0]
             else:
+                # Regular tabular data
                 X_train = train_df.iloc[:, 1:-1]
                 y_train = train_df.iloc[:, -1]
                 
@@ -441,14 +458,12 @@ class ModelTrainer:
                     y_test = None
                     test_sample_ids = test_df.iloc[:, 0]
             
-            X_train, y_train = self._validate_data(X_train, y_train, "Train")
-            X_val, y_val = self._validate_data(X_val, y_val, "Val")
-            X_test, _ = self._validate_data(X_test, None, "Test")
-            
             print(f"X_train shape: {X_train.shape}")
             print(f"X_val shape: {X_val.shape}")
             print(f"X_test shape: {X_test.shape}")
+            print(f"y_train shape: {y_train.shape if hasattr(y_train, 'shape') else len(y_train)}")
             
+            # Determine task type
             y_train_series = y_train
             if y_train_series.dtype == 'object' or len(y_train_series.unique()) < 10:
                 self.task_type = 'classification'
@@ -469,8 +484,8 @@ class ModelTrainer:
                     except Exception as e:
                         print(f"Error encoding test labels: {e}")
                         y_test_encoded = np.array([-1 if label not in self.label_encoder.classes_ else 
-                                                   self.label_encoder.transform([label])[0] 
-                                                   for label in y_test])
+                                                self.label_encoder.transform([label])[0] 
+                                                for label in y_test])
                         y_test = y_test_encoded
             else:
                 self.task_type = 'regression'
