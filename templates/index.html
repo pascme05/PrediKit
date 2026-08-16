@@ -3,33 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PrediKit - Model Training Tool</title>
+    <title>ML-Forge - Model Training Tool</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
             --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
         }
-        
-        body {
-            padding-top: 20px;
-            background-color: #f8f9fa;
-        }
-        .container {
-            max-width: 1400px;
-        }
+        body { padding-top: 20px; background-color: #f8f9fa; }
+        .container { max-width: 1400px; }
         .card {
             margin-bottom: 20px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.08);
             border: none;
             border-radius: 12px;
-            transition: transform 0.2s;
-        }
-        .card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.12);
         }
         .card-header {
             background: var(--primary-gradient);
@@ -38,15 +26,8 @@
             padding: 15px 20px;
             font-weight: 600;
         }
-        .card-header i {
-            margin-right: 8px;
-        }
-        .card-header.download-header {
-            background: var(--secondary-gradient);
-        }
-        .card-header.info-header {
-            background: var(--success-gradient);
-        }
+        .card-header i { margin-right: 8px; }
+        .card-header.download-header { background: var(--secondary-gradient); }
         .metric-card {
             text-align: center;
             padding: 20px;
@@ -54,85 +35,15 @@
             color: white;
             border-radius: 12px;
             margin-bottom: 15px;
-            transition: transform 0.2s;
         }
-        .metric-card:hover {
-            transform: scale(1.02);
-        }
-        .metric-card.regression {
-            background: var(--secondary-gradient);
-        }
-        .metric-card h4 {
-            font-size: 28px;
-            margin: 0;
-            font-weight: 700;
-        }
-        .metric-card small {
-            opacity: 0.9;
-            font-weight: 300;
-        }
-        #results img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .tab-pane {
-            padding: 20px 0;
-        }
-        .prediction-result {
-            font-size: 24px;
-            font-weight: bold;
-            color: #28a745;
-        }
-        .btn-download {
-            background: var(--secondary-gradient);
-            border: none;
-            color: white;
-            padding: 12px 30px;
-            border-radius: 8px;
-            font-weight: 600;
-            transition: all 0.3s;
-        }
-        .btn-download:hover {
-            transform: scale(1.05);
-            color: white;
-            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
-        }
-        .btn-download i {
-            margin-right: 8px;
-        }
+        .metric-card.regression { background: var(--secondary-gradient); }
+        .metric-card h4 { font-size: 28px; margin: 0; font-weight: 700; }
+        .metric-card small { opacity: 0.9; font-weight: 300; }
         .logo-text {
             background: var(--primary-gradient);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             font-weight: 800;
-        }
-        .info-badge {
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        .sheet-info {
-            border-left: 4px solid #667eea;
-            padding-left: 15px;
-            margin-bottom: 10px;
-        }
-        .model-badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .model-badge.dt { background: #e3f2fd; color: #1976d2; }
-        .model-badge.rf { background: #e8f5e9; color: #388e3c; }
-        .model-badge.svm { background: #fce4ec; color: #c62828; }
-        .model-badge.dnn { background: #f3e5f5; color: #7b1fa2; }
-        .loading-spinner {
-            display: none;
-            text-align: center;
-            padding: 20px;
         }
         .feature-input {
             background: #f8f9fa;
@@ -144,6 +55,24 @@
             border-color: #667eea;
             box-shadow: none;
         }
+        .btn-download {
+            background: var(--secondary-gradient);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .btn-download:hover {
+            transform: scale(1.05);
+            color: white;
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+        }
+        .prediction-result {
+            font-size: 24px;
+            font-weight: bold;
+            color: #28a745;
+        }
         .status-badge {
             display: inline-block;
             padding: 4px 12px;
@@ -153,15 +82,47 @@
         }
         .status-badge.has-labels { background: #d4edda; color: #155724; }
         .status-badge.no-labels { background: #fff3cd; color: #856404; }
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        .loading-overlay.active {
+            display: flex;
+        }
+        .loading-spinner {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+        }
+        .loading-spinner i {
+            font-size: 48px;
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p class="mt-2">Processing...</p>
+        </div>
+    </div>
+
     <div class="container">
-        <!-- Header -->
         <div class="text-center mb-4">
             <h1>
                 <i class="fas fa-hammer" style="color: #667eea;"></i>
-                <span class="logo-text">PrediKit</span>
+                <span class="logo-text">ML-Forge</span>
             </h1>
             <p class="text-muted">Forge powerful machine learning models with ease</p>
             <div class="d-flex justify-content-center gap-2 flex-wrap">
@@ -169,22 +130,21 @@
                 <span class="badge bg-success">Regression</span>
                 <span class="badge bg-info">3-Worksheet Format</span>
                 <span class="badge bg-warning text-dark">Train / Val / Test</span>
-                <span class="badge bg-danger">Download Predictions</span>
             </div>
         </div>
 
-        <!-- Data Upload Section -->
+        <!-- Upload Section -->
         <div class="row">
             <div class="col-md-12">
                 <div class="card">
-                    <div class="card-header info-header">
-                        <i class="fas fa-upload"></i> Data Loading - Three Worksheet Format
+                    <div class="card-header">
+                        <i class="fas fa-upload"></i> Data Loading
                     </div>
                     <div class="card-body">
                         <div class="alert alert-info">
                             <i class="fas fa-info-circle"></i> 
-                            <strong>Expected Format:</strong> Excel file with three worksheets: <strong>Train</strong>, <strong>Val</strong>, and <strong>Test</strong>.
-                            <br>Each worksheet should have: <strong>Sample ID</strong> (first column), <strong>Features</strong> (middle columns), <strong>Target</strong> (last column - optional for Test).
+                            Excel file with three worksheets: <strong>Train</strong>, <strong>Val</strong>, and <strong>Test</strong>.
+                            <br>Each worksheet: <strong>Sample ID</strong> (first column), <strong>Features</strong> (middle), <strong>Target</strong> (last column - optional for Test).
                         </div>
                         
                         <form id="uploadForm" enctype="multipart/form-data">
@@ -193,7 +153,6 @@
                                     <div class="mb-3">
                                         <label for="fileInput" class="form-label fw-bold">Excel File (.xlsx)</label>
                                         <input type="file" class="form-control" id="fileInput" name="file" accept=".xlsx,.xls" required>
-                                        <small class="text-muted">Must contain Train, Val, and Test worksheets</small>
                                     </div>
                                 </div>
                                 <div class="col-md-4">
@@ -209,56 +168,20 @@
                         
                         <div id="dataInfo" class="mt-3" style="display:none;">
                             <div class="alert alert-success">
-                                <div class="row align-items-center">
+                                <div class="row">
+                                    <div class="col-md-3"><strong>📊 Task:</strong> <span id="taskType" class="badge bg-info"></span></div>
+                                    <div class="col-md-3"><strong>🔢 Features:</strong> <span id="numFeatures"></span></div>
+                                    <div class="col-md-3"><strong>🎯 Target:</strong> <span id="targetName" class="badge bg-secondary"></span></div>
+                                    <div class="col-md-3"><strong>📋 Test Labels:</strong> <span id="testLabelsStatus" class="status-badge"></span></div>
+                                </div>
+                                <div class="row mt-2">
+                                    <div class="col-md-4"><strong>📘 Train:</strong> <span id="trainSize"></span> samples</div>
+                                    <div class="col-md-4"><strong>📗 Validation:</strong> <span id="valSize"></span> samples</div>
+                                    <div class="col-md-4"><strong>📕 Test:</strong> <span id="testSize"></span> samples</div>
+                                </div>
+                                <div class="row mt-2">
                                     <div class="col-md-12">
-                                        <div class="row">
-                                            <div class="col-md-3">
-                                                <strong>📊 Task:</strong> 
-                                                <span id="taskType" class="badge bg-info"></span>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <strong>🔢 Features:</strong> 
-                                                <span id="numFeatures"></span>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <strong>🎯 Target:</strong> 
-                                                <span id="targetName" class="badge bg-secondary"></span>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <strong>📋 Test Labels:</strong> 
-                                                <span id="testLabelsStatus" class="status-badge"></span>
-                                            </div>
-                                        </div>
-                                        <div class="row mt-2">
-                                            <div class="col-md-4">
-                                                <div class="sheet-info">
-                                                    <strong>📘 Train:</strong> <span id="trainSize"></span> samples
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <div class="sheet-info">
-                                                    <strong>📗 Validation:</strong> <span id="valSize"></span> samples
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <div class="sheet-info">
-                                                    <strong>📕 Test:</strong> <span id="testSize"></span> samples
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="row mt-2">
-                                            <div class="col-md-12">
-                                                <small class="text-muted">
-                                                    <i class="fas fa-info-circle"></i> 
-                                                    Features: <span id="featureList"></span>
-                                                </small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-12 text-end mt-2">
-                                        <button class="btn btn-sm btn-outline-danger" id="clearDataBtn">
-                                            <i class="fas fa-trash"></i> Clear Data
-                                        </button>
+                                        <small class="text-muted">Features: <span id="featureList"></span></small>
                                     </div>
                                 </div>
                             </div>
@@ -269,7 +192,7 @@
         </div>
 
         <div class="row">
-            <!-- Model Training Section -->
+            <!-- Training Section -->
             <div class="col-md-4">
                 <div class="card">
                     <div class="card-header">
@@ -301,7 +224,7 @@
                         
                         <div id="trainingResults" class="mt-3" style="display:none;">
                             <div class="alert alert-info">
-                                <strong>Training Results:</strong><br>
+                                <strong>✅ Training Results:</strong><br>
                                 Train Score: <span id="trainScore" class="fw-bold"></span><br>
                                 Validation Score: <span id="valScore" class="fw-bold"></span>
                             </div>
@@ -315,7 +238,6 @@
                         <i class="fas fa-download"></i> Export Predictions
                     </div>
                     <div class="card-body">
-                        <p class="text-muted small">Download predictions for test set as Excel file</p>
                         <div class="d-grid">
                             <button class="btn btn-download" id="downloadBtn" disabled>
                                 <i class="fas fa-file-excel"></i> Download Test Predictions
@@ -336,24 +258,24 @@
                     </div>
                     <div class="card-body">
                         <ul class="nav nav-tabs" id="resultTabs" role="tablist">
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link active" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics" type="button" role="tab">
+                            <li class="nav-item">
+                                <button class="nav-link active" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics" type="button">
                                     <i class="fas fa-tachometer-alt"></i> Metrics
                                 </button>
                             </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="visualizations-tab" data-bs-toggle="tab" data-bs-target="#visualizations" type="button" role="tab">
+                            <li class="nav-item">
+                                <button class="nav-link" id="visualizations-tab" data-bs-toggle="tab" data-bs-target="#visualizations" type="button">
                                     <i class="fas fa-chart-pie"></i> Visualizations
                                 </button>
                             </li>
-                            <li class="nav-item" role="presentation">
-                                <button class="nav-link" id="predictions-tab" data-bs-toggle="tab" data-bs-target="#predictions" type="button" role="tab">
+                            <li class="nav-item">
+                                <button class="nav-link" id="predictions-tab" data-bs-toggle="tab" data-bs-target="#predictions" type="button">
                                     <i class="fas fa-magic"></i> Predict
                                 </button>
                             </li>
                         </ul>
-                        <div class="tab-content" id="resultTabContent">
-                            <div class="tab-pane fade show active" id="metrics" role="tabpanel">
+                        <div class="tab-content">
+                            <div class="tab-pane fade show active" id="metrics">
                                 <div id="metricsContent">
                                     <div class="text-center text-muted py-4">
                                         <i class="fas fa-info-circle fa-2x"></i>
@@ -361,7 +283,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-pane fade" id="visualizations" role="tabpanel">
+                            <div class="tab-pane fade" id="visualizations">
                                 <div id="visualizationContent">
                                     <div class="text-center text-muted py-4">
                                         <i class="fas fa-chart-line fa-2x"></i>
@@ -369,7 +291,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="tab-pane fade" id="predictions" role="tabpanel">
+                            <div class="tab-pane fade" id="predictions">
                                 <div id="predictionContent">
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">Enter feature values for prediction:</label>
@@ -394,7 +316,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Model parameters configuration
+        // Model parameters
         const modelParams = {
             'DT': {
                 'max_depth': {type: 'number', default: 5, min: 1, max: 20},
@@ -418,7 +340,11 @@
         let isModelTrained = false;
         let hasTestLabels = false;
 
-        // Update parameter inputs based on selected model
+        // Show/hide loading overlay
+        function showLoading(show) {
+            document.getElementById('loadingOverlay').classList.toggle('active', show);
+        }
+
         document.getElementById('modelSelect').addEventListener('change', function() {
             updateParamInputs(this.value);
         });
@@ -472,10 +398,9 @@
             }
         }
 
-        // Initialize with default model
         updateParamInputs('RF');
 
-        // Handle file upload
+        // Upload handler
         document.getElementById('uploadForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -483,6 +408,7 @@
             const uploadBtn = document.getElementById('uploadBtn');
             uploadBtn.disabled = true;
             uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+            showLoading(true);
             
             try {
                 const response = await fetch('/upload', {
@@ -496,10 +422,10 @@
                     alert('❌ Error: ' + data.error);
                     uploadBtn.disabled = false;
                     uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Upload & Process';
+                    showLoading(false);
                     return;
                 }
                 
-                // Display data info
                 document.getElementById('dataInfo').style.display = 'block';
                 document.getElementById('numFeatures').textContent = data.data_info.features;
                 
@@ -512,7 +438,6 @@
                 document.getElementById('valSize').textContent = data.data_info.samples_val;
                 document.getElementById('testSize').textContent = data.data_info.samples_test;
                 
-                // Test labels status
                 hasTestLabels = data.has_test_labels;
                 const statusElem = document.getElementById('testLabelsStatus');
                 if (hasTestLabels) {
@@ -523,15 +448,10 @@
                     statusElem.className = 'status-badge no-labels';
                 }
                 
-                // Feature list
                 document.getElementById('featureList').textContent = data.feature_names.join(', ');
-                
-                // Update feature inputs for prediction
                 updateFeatureInputs(data.feature_names);
                 
-                // Enable training form
                 document.getElementById('trainBtn').disabled = false;
-                
                 showToast('✅ Data loaded successfully!', 'success');
                 
             } catch (error) {
@@ -539,6 +459,7 @@
             } finally {
                 uploadBtn.disabled = false;
                 uploadBtn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i> Upload & Process';
+                showLoading(false);
             }
         });
 
@@ -568,14 +489,13 @@
             });
         }
 
-        // Handle model training
+        // Train handler
         document.getElementById('trainForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const modelName = document.getElementById('modelSelect').value;
             const params = {};
             
-            // Get parameter values
             const paramInputs = document.querySelectorAll('#paramInputs input, #paramInputs select');
             paramInputs.forEach(input => {
                 const value = input.type === 'number' ? parseFloat(input.value) : input.value;
@@ -585,6 +505,7 @@
             const trainBtn = document.getElementById('trainBtn');
             trainBtn.disabled = true;
             trainBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Training...';
+            showLoading(true);
             
             try {
                 const response = await fetch('/train', {
@@ -602,23 +523,23 @@
                 
                 if (data.error) {
                     alert('❌ Error: ' + data.error);
+                    trainBtn.disabled = false;
+                    trainBtn.innerHTML = '<i class="fas fa-play"></i> Train Model';
+                    showLoading(false);
                     return;
                 }
                 
-                // Display training results
                 document.getElementById('trainingResults').style.display = 'block';
                 document.getElementById('trainScore').textContent = (data.results.train_score * 100).toFixed(2) + '%';
                 document.getElementById('valScore').textContent = (data.results.val_score * 100).toFixed(2) + '%';
                 
-                // Enable download button
                 document.getElementById('downloadBtn').disabled = false;
                 document.getElementById('downloadStatus').textContent = '✅ Predictions ready for download!';
                 
                 isModelTrained = true;
                 
-                // Evaluate model
+                // Now evaluate the model
                 await evaluateModel();
-                
                 showToast('✅ Model trained successfully!', 'success');
                 
             } catch (error) {
@@ -626,10 +547,11 @@
             } finally {
                 trainBtn.disabled = false;
                 trainBtn.innerHTML = '<i class="fas fa-play"></i> Train Model';
+                showLoading(false);
             }
         });
 
-        // Evaluate model
+        // Evaluate handler
         async function evaluateModel() {
             try {
                 const response = await fetch('/evaluate');
@@ -654,12 +576,9 @@
                 metricsContainer.innerHTML = `
                     <div class="alert alert-warning">
                         <i class="fas fa-exclamation-triangle"></i>
-                        <strong>Note:</strong> Test data does not contain target column. 
-                        Only predictions are available. 
+                        <strong>Note:</strong> Test data does not contain target column.
                         <br><br>
-                        <div class="mt-2">
-                            <strong>Number of predictions:</strong> ${results.predictions ? results.predictions.length : 0}
-                        </div>
+                        <strong>Number of predictions:</strong> ${results.predictions ? results.predictions.length : 0}
                     </div>
                 `;
                 return;
@@ -668,6 +587,17 @@
             let metricsHTML = '<div class="row">';
             
             if (taskType === 'classification') {
+                // Check if classification report exists
+                if (!results.classification_report) {
+                    metricsContainer.innerHTML = `
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> No classification report available.
+                            <br>Please check your data.
+                        </div>
+                    `;
+                    return;
+                }
+                
                 const report = results.classification_report;
                 metricsHTML += `
                     <div class="col-md-4">
@@ -678,14 +608,14 @@
                     </div>
                     <div class="col-md-4">
                         <div class="metric-card">
-                            <h4>${(report.weighted_avg.f1_score * 100).toFixed(2)}%</h4>
-                            <small>F1 Score (Weighted)</small>
+                            <h4>${report.weighted_avg ? (report.weighted_avg.f1_score * 100).toFixed(2) + '%' : 'N/A'}</h4>
+                            <small>F1 Score</small>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="metric-card">
-                            <h4>${report.weighted_avg.precision ? (report.weighted_avg.precision * 100).toFixed(2) + '%' : 'N/A'}</h4>
-                            <small>Precision (Weighted)</small>
+                            <h4>${report.weighted_avg ? (report.weighted_avg.precision * 100).toFixed(2) + '%' : 'N/A'}</h4>
+                            <small>Precision</small>
                         </div>
                     </div>
                 `;
@@ -693,25 +623,25 @@
                 metricsHTML += `
                     <div class="col-md-3">
                         <div class="metric-card regression">
-                            <h4>${results.r2.toFixed(4)}</h4>
+                            <h4>${results.r2 ? results.r2.toFixed(4) : 'N/A'}</h4>
                             <small>R² Score</small>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="metric-card regression">
-                            <h4>${results.rmse.toFixed(4)}</h4>
+                            <h4>${results.rmse ? results.rmse.toFixed(4) : 'N/A'}</h4>
                             <small>RMSE</small>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="metric-card regression">
-                            <h4>${results.mae.toFixed(4)}</h4>
+                            <h4>${results.mae ? results.mae.toFixed(4) : 'N/A'}</h4>
                             <small>MAE</small>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="metric-card regression">
-                            <h4>${results.mse.toFixed(4)}</h4>
+                            <h4>${results.mse ? results.mse.toFixed(4) : 'N/A'}</h4>
                             <small>MSE</small>
                         </div>
                     </div>
@@ -720,36 +650,44 @@
             
             metricsHTML += '</div>';
             
-            if (taskType === 'classification') {
-                metricsHTML += `
-                    <div class="mt-3">
-                        <h6>Classification Report</h6>
-                        <div class="table-responsive">
-                            <table class="table table-sm table-bordered table-hover">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Class</th>
-                                        <th>Precision</th>
-                                        <th>Recall</th>
-                                        <th>F1-Score</th>
-                                        <th>Support</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${Object.entries(results.classification_report).filter(([k,v]) => !['accuracy', 'macro avg', 'weighted avg'].includes(k)).map(([cls, metrics]) => `
+            if (taskType === 'classification' && results.classification_report) {
+                const report = results.classification_report;
+                // Filter out non-class entries
+                const classEntries = Object.entries(report).filter(([k,v]) => 
+                    !['accuracy', 'macro avg', 'weighted avg'].includes(k)
+                );
+                
+                if (classEntries.length > 0) {
+                    metricsHTML += `
+                        <div class="mt-3">
+                            <h6>Classification Report</h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered">
+                                    <thead class="table-light">
                                         <tr>
-                                            <td><strong>${cls}</strong></td>
-                                            <td>${metrics.precision ? metrics.precision.toFixed(3) : 'N/A'}</td>
-                                            <td>${metrics.recall ? metrics.recall.toFixed(3) : 'N/A'}</td>
-                                            <td>${metrics.f1_score ? metrics.f1_score.toFixed(3) : 'N/A'}</td>
-                                            <td>${metrics.support || 'N/A'}</td>
+                                            <th>Class</th>
+                                            <th>Precision</th>
+                                            <th>Recall</th>
+                                            <th>F1-Score</th>
+                                            <th>Support</th>
                                         </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        ${classEntries.map(([cls, metrics]) => `
+                                            <tr>
+                                                <td><strong>${cls}</strong></td>
+                                                <td>${metrics.precision ? metrics.precision.toFixed(3) : 'N/A'}</td>
+                                                <td>${metrics.recall ? metrics.recall.toFixed(3) : 'N/A'}</td>
+                                                <td>${metrics.f1_score ? metrics.f1_score.toFixed(3) : 'N/A'}</td>
+                                                <td>${metrics.support || 'N/A'}</td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                }
             }
             
             metricsContainer.innerHTML = metricsHTML;
@@ -758,28 +696,35 @@
             const vizContainer = document.getElementById('visualizationContent');
             let vizHTML = '';
             
-            if (taskType === 'classification') {
+            if (taskType === 'classification' && results.confusion_matrix_img) {
                 vizHTML = `
                     <div class="text-center">
                         <h6>Confusion Matrix - Test Set</h6>
-                        <img src="data:image/png;base64,${results.confusion_matrix_img}" alt="Confusion Matrix" class="img-fluid rounded shadow">
+                        <img src="data:image/png;base64,${results.confusion_matrix_img}" class="img-fluid rounded shadow" style="max-width: 100%;">
                     </div>
                 `;
-            } else {
+            } else if (taskType === 'regression' && results.scatter_img) {
                 vizHTML = `
                     <div class="row">
                         <div class="col-md-6">
                             <div class="text-center">
-                                <h6>Predictions vs Actual - Test Set</h6>
-                                <img src="data:image/png;base64,${results.scatter_img}" alt="Predictions vs Actual" class="img-fluid rounded shadow">
+                                <h6>Predictions vs Actual</h6>
+                                <img src="data:image/png;base64,${results.scatter_img}" class="img-fluid rounded shadow">
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="text-center">
-                                <h6>Residual Plot - Test Set</h6>
-                                <img src="data:image/png;base64,${results.residuals_img}" alt="Residual Plot" class="img-fluid rounded shadow">
+                                <h6>Residual Plot</h6>
+                                <img src="data:image/png;base64,${results.residuals_img}" class="img-fluid rounded shadow">
                             </div>
                         </div>
+                    </div>
+                `;
+            } else {
+                vizHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        No visualizations available for this model.
                     </div>
                 `;
             }
@@ -787,7 +732,7 @@
             vizContainer.innerHTML = vizHTML;
         }
 
-        // Handle prediction
+        // Predict handler
         document.getElementById('predictBtn').addEventListener('click', async function() {
             const featureInputs = document.querySelectorAll('#featureInputs input');
             const features = [];
@@ -803,6 +748,7 @@
             
             this.disabled = true;
             this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Predicting...';
+            showLoading(true);
             
             try {
                 const response = await fetch('/predict', {
@@ -828,36 +774,24 @@
             } finally {
                 this.disabled = false;
                 this.innerHTML = '<i class="fas fa-magic"></i> Predict';
+                showLoading(false);
             }
         });
 
-        // Handle download
-        document.getElementById('downloadBtn').addEventListener('click', async function() {
+        // Download handler
+        document.getElementById('downloadBtn').addEventListener('click', function() {
             const originalText = this.innerHTML;
             this.disabled = true;
             this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
             
             try {
-                const url = '/download';
-                window.location.href = url;
+                window.location.href = '/download';
                 showToast('✅ Download started!', 'success');
             } catch (error) {
                 alert('❌ Error downloading: ' + error.message);
             } finally {
                 this.disabled = false;
                 this.innerHTML = originalText;
-            }
-        });
-
-        // Clear data
-        document.getElementById('clearDataBtn').addEventListener('click', async function() {
-            if (!confirm('Are you sure you want to clear all data?')) return;
-            
-            try {
-                await fetch('/clear', { method: 'POST' });
-                location.reload();
-            } catch (error) {
-                alert('Error clearing data: ' + error.message);
             }
         });
 
