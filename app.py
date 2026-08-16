@@ -1,4 +1,4 @@
-# app.py - WITH PROPER FEATURE HANDLING
+# app.py - FIXED DNN PARAMETER HANDLING
 from flask import Flask, render_template, request, jsonify, send_file, make_response
 import pandas as pd
 import numpy as np
@@ -62,21 +62,19 @@ class ModelTrainer:
         self.training_history = []
         self.has_test_labels = False
         self.test_is_empty = False
+        self.eval_type = 'test'
+        self.last_evaluation_results = None
         
     def _handle_missing_values(self, df, name="data"):
         """Handle missing values in dataframe"""
         print(f"Checking for missing values in {name}...")
         
-        # Check for NaN values
         nan_count = df.isna().sum().sum()
         if nan_count > 0:
             print(f"Found {nan_count} missing values in {name}")
-            
-            # Get columns with NaN
             nan_columns = df.columns[df.isna().any()].tolist()
             print(f"Columns with NaN: {nan_columns}")
             
-            # Fill with mean for numerical columns
             for col in df.columns:
                 if df[col].dtype in ['float64', 'int64']:
                     if df[col].isna().any():
@@ -99,16 +97,13 @@ class ModelTrainer:
         """Validate data and handle any issues"""
         print(f"Validating {name}...")
         
-        # Check for infinite values
         if isinstance(X, pd.DataFrame):
-            # Check for inf values
             inf_count = X.isin([np.inf, -np.inf]).sum().sum()
             if inf_count > 0:
                 print(f"Found {inf_count} infinite values in {name}")
                 X = X.replace([np.inf, -np.inf], np.nan)
                 X = self._handle_missing_values(X, name)
         
-        # Ensure all features are numeric
         for col in X.columns:
             if X[col].dtype == 'object':
                 print(f"Converting object column {col} to numeric...")
@@ -123,7 +118,6 @@ class ModelTrainer:
                     X[col] = le.fit_transform(X[col].astype(str))
         
         if y is not None:
-            # Handle missing values in target
             if isinstance(y, pd.Series):
                 if y.isna().any():
                     print(f"Found missing values in target, dropping rows with NaN target")
@@ -146,7 +140,6 @@ class ModelTrainer:
                 if sheet not in sheet_names:
                     raise ValueError(f"Required worksheet '{sheet}' not found. Found: {sheet_names}")
             
-            # Load data and handle missing values
             train_df = pd.read_excel(xlsx_file, sheet_name='Train')
             train_df = self._handle_missing_values(train_df, "Train")
             
@@ -164,34 +157,28 @@ class ModelTrainer:
                 if df.shape[1] < 3:
                     raise ValueError(f"{name} sheet must have at least 3 columns (Sample ID, features, target)")
             
-            # Get column names
             self.sample_id_col = train_df.columns[0]
             print(f"Sample ID column: {self.sample_id_col}")
             
-            # Extract feature columns (all except first and last)
             feature_cols = train_df.columns[1:-1].tolist()
             self.target_name = train_df.columns[-1]
             
             print(f"Feature columns: {feature_cols}")
             print(f"Target column: {self.target_name}")
             
-            # Extract features and target using column names
             X_train = train_df[feature_cols].copy()
             y_train = train_df[self.target_name].copy()
             
             X_val = val_df[feature_cols].copy()
             y_val = val_df[self.target_name].copy()
             
-            # Handle test data
             test_cols = test_df.columns.tolist()
             if len(test_cols) > len(feature_cols) + 1:
-                # Test has target column
                 self.has_test_labels = True
                 X_test = test_df[feature_cols].copy()
                 y_test = test_df[self.target_name].copy()
                 test_sample_ids = test_df[self.sample_id_col].copy()
                 
-                # Check if target column is empty
                 if y_test.isna().all() or (y_test.dtype == 'object' and y_test.str.strip().eq('').all()):
                     self.test_is_empty = True
                     self.has_test_labels = False
@@ -200,7 +187,6 @@ class ModelTrainer:
                     self.test_is_empty = False
                     print(f"Test has labels in column '{self.target_name}'")
             else:
-                # Test has no target column
                 self.has_test_labels = False
                 self.test_is_empty = True
                 X_test = test_df[feature_cols].copy()
@@ -208,10 +194,8 @@ class ModelTrainer:
                 test_sample_ids = test_df[self.sample_id_col].copy()
                 print("Test has no target column")
             
-            # Store feature names
             self.feature_names = feature_cols
             
-            # Validate and clean data
             X_train, y_train = self._validate_data(X_train, y_train, "Train")
             X_val, y_val = self._validate_data(X_val, y_val, "Val")
             X_test, _ = self._validate_data(X_test, None, "Test")
@@ -220,7 +204,6 @@ class ModelTrainer:
             print(f"X_val columns: {X_val.columns.tolist()}")
             print(f"X_test columns: {X_test.columns.tolist()}")
             
-            # Determine task type
             y_train_series = y_train
             if y_train_series.dtype == 'object' or len(y_train_series.unique()) < 10:
                 self.task_type = 'classification'
@@ -248,20 +231,17 @@ class ModelTrainer:
                 self.task_type = 'regression'
                 print("Task type: REGRESSION")
             
-            # Final validation - ensure no NaN in training data
             print("\nFinal validation - checking for any remaining NaN values...")
             print(f"X_train NaN count: {X_train.isna().sum().sum()}")
             print(f"X_val NaN count: {X_val.isna().sum().sum()}")
             print(f"X_test NaN count: {X_test.isna().sum().sum()}")
             
-            # If any NaN found, do aggressive cleaning
             if X_train.isna().sum().sum() > 0:
                 print("WARNING: NaN values still present in X_train! Doing aggressive cleaning...")
                 X_train = X_train.fillna(0)
                 X_val = X_val.fillna(0)
                 X_test = X_test.fillna(0)
             
-            # Store data
             data_store['X_train'] = X_train
             data_store['X_val'] = X_val
             data_store['X_test'] = X_test
@@ -295,31 +275,63 @@ class ModelTrainer:
             raise
     
     def _process_dnn_params(self, params):
-        """Process DNN parameters to correct types"""
-        processed_params = params.copy()
+        """Process DNN parameters to correct types with proper defaults"""
+        processed_params = {}
         
-        if 'hidden_layer_sizes' in processed_params:
-            hidden = processed_params['hidden_layer_sizes']
-            if isinstance(hidden, str):
+        # Define defaults for DNN parameters
+        defaults = {
+            'hidden_layer_sizes': (100, 50),  # Default: two hidden layers with 100 and 50 neurons
+            'max_iter': 200,
+            'alpha': 0.0001,
+            'learning_rate_init': 0.001,
+            'random_state': 42
+        }
+        
+        # Start with defaults
+        for key, default_value in defaults.items():
+            processed_params[key] = default_value
+        
+        # Override with provided parameters
+        for key, value in params.items():
+            if key == 'hidden_layer_sizes':
+                if isinstance(value, str):
+                    try:
+                        # Parse string like "100,50" or "100"
+                        layers = [int(x.strip()) for x in value.split(',') if x.strip()]
+                        if len(layers) == 1:
+                            processed_params['hidden_layer_sizes'] = layers[0]
+                        else:
+                            processed_params['hidden_layer_sizes'] = tuple(layers)
+                        print(f"Parsed hidden_layer_sizes: {processed_params['hidden_layer_sizes']}")
+                    except ValueError as e:
+                        print(f"Error parsing hidden_layer_sizes: {e}, using default")
+                        processed_params['hidden_layer_sizes'] = defaults['hidden_layer_sizes']
+                elif isinstance(value, (int, float)):
+                    processed_params['hidden_layer_sizes'] = int(value)
+                elif isinstance(value, (list, tuple)):
+                    processed_params['hidden_layer_sizes'] = tuple(value)
+            elif key == 'alpha':
                 try:
-                    layers = [int(x.strip()) for x in hidden.split(',') if x.strip()]
-                    if len(layers) == 1:
-                        processed_params['hidden_layer_sizes'] = layers[0]
-                    else:
-                        processed_params['hidden_layer_sizes'] = tuple(layers)
-                    print(f"Processed hidden_layer_sizes: {processed_params['hidden_layer_sizes']}")
-                except ValueError as e:
-                    print(f"Error parsing hidden_layer_sizes: {e}")
-                    processed_params['hidden_layer_sizes'] = (100, 50)
-            elif isinstance(hidden, (int, float)):
-                processed_params['hidden_layer_sizes'] = int(hidden)
-            elif isinstance(hidden, (list, tuple)):
-                processed_params['hidden_layer_sizes'] = tuple(hidden)
+                    processed_params['alpha'] = float(value)
+                except:
+                    processed_params['alpha'] = defaults['alpha']
+            elif key == 'max_iter':
+                try:
+                    processed_params['max_iter'] = int(value)
+                except:
+                    processed_params['max_iter'] = defaults['max_iter']
+            elif key == 'learning_rate_init':
+                try:
+                    processed_params['learning_rate_init'] = float(value)
+                except:
+                    processed_params['learning_rate_init'] = defaults['learning_rate_init']
+            else:
+                processed_params[key] = value
         
+        print(f"Final DNN params: {processed_params}")
         return processed_params
     
     def train_model(self, model_name, **params):
-        """Train the selected model"""
         print("=== TRAINING MODEL ===")
         print(f"Model: {model_name}")
         print(f"Original Params: {params}")
@@ -341,11 +353,16 @@ class ModelTrainer:
             model_class = self.models[model_name][model_key]
             print(f"Model class: {model_class}")
             
+            # For SVM, handle probability for classification
+            if model_name == 'SVM' and self.task_type == 'classification':
+                if 'probability' not in params:
+                    params['probability'] = True
+                if 'random_state' not in params:
+                    params['random_state'] = 42
+            
             self.model = model_class(**params)
             print("Model instantiated")
             
-            # Ensure no NaN in features before scaling
-            print("Checking for NaN before scaling...")
             X_train = data_store['X_train']
             X_val = data_store['X_val']
             
@@ -365,7 +382,6 @@ class ModelTrainer:
             print(f"X_train shape: {X_train_scaled.shape}")
             print(f"X_val shape: {X_val_scaled.shape}")
             
-            # Check for NaN after scaling
             if np.isnan(X_train_scaled).any():
                 print("WARNING: NaN found after scaling! Replacing with 0")
                 X_train_scaled = np.nan_to_num(X_train_scaled)
@@ -396,7 +412,6 @@ class ModelTrainer:
             X_all = pd.concat([data_store['X_train'], data_store['X_val'], data_store['X_test']])
             X_all_scaled = self.scaler.transform(X_all)
             
-            # Check for NaN in predictions
             if np.isnan(X_all_scaled).any():
                 print("WARNING: NaN found in X_all_scaled, replacing with 0")
                 X_all_scaled = np.nan_to_num(X_all_scaled)
@@ -417,46 +432,48 @@ class ModelTrainer:
             raise
     
     def evaluate_model(self):
-        """Evaluate the trained model - uses test if available, otherwise validation"""
         print("=== EVALUATING MODEL ===")
         try:
             if self.model is None:
                 raise ValueError("No model trained yet.")
             
-            # Determine which dataset to use for evaluation
             use_test = data_store['has_test_labels'] and data_store['y_test'] is not None
             
             if use_test:
                 print("Using TEST set for evaluation")
                 X_eval = data_store['X_test']
                 y_true = data_store['y_test']
-                eval_type = "test"
+                self.eval_type = 'test'
             else:
                 print("Using VALIDATION set for evaluation (test has no labels)")
                 X_eval = data_store['X_val']
                 y_true = data_store['y_val']
-                eval_type = "validation"
+                self.eval_type = 'validation'
             
-            # Ensure no NaN
             if X_eval.isna().sum().sum() > 0:
-                print(f"WARNING: Found NaN in {eval_type} data, filling with 0")
+                print(f"WARNING: Found NaN in {self.eval_type} data, filling with 0")
                 X_eval = X_eval.fillna(0)
             
             X_eval_scaled = self.scaler.transform(X_eval)
             
-            # Check for NaN after scaling
             if np.isnan(X_eval_scaled).any():
                 print("WARNING: NaN found in scaled data, replacing with 0")
                 X_eval_scaled = np.nan_to_num(X_eval_scaled)
             
             y_pred = self.model.predict(X_eval_scaled)
             
-            # Store predictions
             if use_test:
                 data_store['test_predictions'] = y_pred
+                data_store['test_sample_ids'] = data_store['test_sample_ids']
             else:
                 data_store['test_predictions'] = y_pred
                 data_store['test_sample_ids'] = data_store['val_sample_ids']
+            
+            self.last_evaluation_results = {
+                'eval_type': self.eval_type,
+                'predictions': y_pred.tolist(),
+                'y_true': y_true.tolist()
+            }
             
             if self.task_type == 'classification':
                 accuracy = accuracy_score(y_true, y_pred)
@@ -467,7 +484,7 @@ class ModelTrainer:
                 sns.heatmap(conf_matrix, annot=True, fmt='d', cmap='Blues', ax=ax)
                 ax.set_xlabel('Predicted')
                 ax.set_ylabel('True')
-                ax.set_title(f'Confusion Matrix - {eval_type.capitalize()} Set')
+                ax.set_title(f'Confusion Matrix - {self.eval_type.capitalize()} Set')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -475,27 +492,52 @@ class ModelTrainer:
                 conf_matrix_img = base64.b64encode(buf.getvalue()).decode('utf-8')
                 plt.close()
                 
-                return {
+                result = {
                     'has_labels': True,
-                    'eval_type': eval_type,
+                    'eval_type': self.eval_type,
                     'accuracy': accuracy,
                     'classification_report': report,
-                    'confusion_matrix': conf_matrix.tolist(),
                     'confusion_matrix_img': conf_matrix_img,
-                    'predictions': y_pred.tolist()
+                    'predictions': y_pred.tolist(),
+                    'y_true': y_true.tolist()
                 }
+                self.last_evaluation_results.update(result)
+                return result
+                
             else:  # regression
                 mse = mean_squared_error(y_true, y_pred)
                 rmse = np.sqrt(mse)
                 mae = mean_absolute_error(y_true, y_pred)
                 r2 = r2_score(y_true, y_pred)
                 
+                # Line plot
+                fig, ax = plt.subplots(figsize=(10, 6))
+                sorted_idx = np.argsort(y_true)
+                y_true_sorted = y_true[sorted_idx]
+                y_pred_sorted = y_pred[sorted_idx]
+                
+                ax.plot(range(len(y_true_sorted)), y_true_sorted, 'b-', label='Actual', linewidth=2)
+                ax.plot(range(len(y_pred_sorted)), y_pred_sorted, 'r--', label='Predicted', linewidth=2)
+                ax.set_xlabel('Sample Index')
+                ax.set_ylabel('Value')
+                ax.set_title(f'Predictions vs Actual - {self.eval_type.capitalize()} Set')
+                ax.legend()
+                ax.grid(True, alpha=0.3)
+                
+                buf = io.BytesIO()
+                plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+                buf.seek(0)
+                line_plot_img = base64.b64encode(buf.getvalue()).decode('utf-8')
+                plt.close()
+                
+                # Scatter plot
                 fig, ax = plt.subplots(figsize=(8, 6))
                 ax.scatter(y_true, y_pred, alpha=0.6)
                 ax.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
                 ax.set_xlabel('Actual Values')
                 ax.set_ylabel('Predicted Values')
-                ax.set_title(f'Predictions vs Actual - {eval_type.capitalize()} Set')
+                ax.set_title(f'Scatter Plot - {self.eval_type.capitalize()} Set')
+                ax.grid(True, alpha=0.3)
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -503,13 +545,15 @@ class ModelTrainer:
                 scatter_img = base64.b64encode(buf.getvalue()).decode('utf-8')
                 plt.close()
                 
+                # Residual plot
                 residuals = y_true - y_pred
                 fig, ax = plt.subplots(figsize=(8, 6))
                 ax.scatter(y_pred, residuals, alpha=0.6)
                 ax.axhline(y=0, color='r', linestyle='--', lw=2)
                 ax.set_xlabel('Predicted Values')
                 ax.set_ylabel('Residuals')
-                ax.set_title(f'Residual Plot - {eval_type.capitalize()} Set')
+                ax.set_title(f'Residual Plot - {self.eval_type.capitalize()} Set')
+                ax.grid(True, alpha=0.3)
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -517,17 +561,22 @@ class ModelTrainer:
                 residuals_img = base64.b64encode(buf.getvalue()).decode('utf-8')
                 plt.close()
                 
-                return {
+                result = {
                     'has_labels': True,
-                    'eval_type': eval_type,
+                    'eval_type': self.eval_type,
                     'mse': mse,
                     'rmse': rmse,
                     'mae': mae,
                     'r2': r2,
+                    'line_plot_img': line_plot_img,
                     'scatter_img': scatter_img,
                     'residuals_img': residuals_img,
-                    'predictions': y_pred.tolist()
+                    'predictions': y_pred.tolist(),
+                    'y_true': y_true.tolist()
                 }
+                self.last_evaluation_results.update(result)
+                return result
+                
         except Exception as e:
             print(f"ERROR in evaluate_model: {str(e)}")
             traceback.print_exc()
@@ -537,25 +586,19 @@ class ModelTrainer:
         if self.model is None:
             raise ValueError("No model trained yet.")
         
-        # Ensure columns match what was trained on
         if hasattr(X_new, 'columns'):
-            # Reorder columns to match training
             X_new = X_new[self.feature_names]
         elif isinstance(X_new, np.ndarray):
-            # If numpy array, just use as is
             pass
         else:
-            # Convert to DataFrame with correct columns
             X_new = pd.DataFrame(X_new, columns=self.feature_names)
         
-        # Handle any NaN in input
         if hasattr(X_new, 'isna') and X_new.isna().sum().sum() > 0:
             print("WARNING: NaN in prediction input, filling with 0")
             X_new = X_new.fillna(0)
         
         X_scaled = self.scaler.transform(X_new)
         
-        # Handle any NaN after scaling
         if np.isnan(X_scaled).any():
             print("WARNING: NaN after scaling, replacing with 0")
             X_scaled = np.nan_to_num(X_scaled)
@@ -571,7 +614,6 @@ class ModelTrainer:
         if self.model is None:
             raise ValueError("No model trained yet.")
         
-        # Use test sample IDs if available and test has labels
         if data_store['has_test_labels'] and data_store['y_test'] is not None:
             sample_ids = data_store['test_sample_ids']
             predictions = data_store['test_predictions']
@@ -681,7 +723,6 @@ def train_model():
         if not model_name:
             return jsonify({'error': 'Model name not specified'}), 400
         
-        # Convert params to appropriate types
         for key, value in params.items():
             if isinstance(value, str):
                 if value.isdigit():
@@ -716,6 +757,7 @@ def train_model():
 def evaluate_model():
     try:
         results = trainer.evaluate_model()
+        print(f"Evaluation results keys: {results.keys()}")
         return jsonify({
             'success': True,
             'results': results,
@@ -737,7 +779,6 @@ def predict():
         return jsonify({'error': 'No features provided'}), 400
     
     try:
-        # Create DataFrame with correct feature names
         X_new = pd.DataFrame([features], columns=trainer.feature_names)
         predictions = trainer.predict_single(X_new)
         
