@@ -1,4 +1,4 @@
-# app.py - FIXED DNN PARAMETER HANDLING
+# app.py - WITH CLEAR VALIDATION INDICATION FOR NO GROUND TRUTH
 from flask import Flask, render_template, request, jsonify, send_file, make_response
 import pandas as pd
 import numpy as np
@@ -14,22 +14,115 @@ from sklearn.svm import SVC, SVR
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.decomposition import PCA
 import seaborn as sns
 import warnings
 warnings.filterwarnings('ignore')
 import os
 import traceback
+import zipfile
+import tempfile
 from werkzeug.utils import secure_filename
 from datetime import datetime
+from PIL import Image
+import torch
+import torchvision.transforms as transforms
+import torchvision.models as models
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB for images
 
 os.makedirs('uploads', exist_ok=True)
 os.makedirs('static', exist_ok=True)
 
 data_store = {}
+
+class ImageFeatureExtractor:
+    """Extract features from images using pre-trained CNN models"""
+    
+    def __init__(self, model_name='resnet50'):
+        self.model_name = model_name
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = None
+        self.transform = None
+        self.feature_dim = None
+        self._load_model()
+        
+    def _load_model(self):
+        """Load pre-trained model and transform"""
+        print(f"Loading {self.model_name} on {self.device}...")
+        
+        if self.model_name == 'resnet50':
+            self.model = models.resnet50(pretrained=True)
+            self.model = torch.nn.Sequential(*list(self.model.children())[:-1])
+            self.feature_dim = 2048
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                   std=[0.229, 0.224, 0.225])
+            ])
+        elif self.model_name == 'resnet18':
+            self.model = models.resnet18(pretrained=True)
+            self.model = torch.nn.Sequential(*list(self.model.children())[:-1])
+            self.feature_dim = 512
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                   std=[0.229, 0.224, 0.225])
+            ])
+        elif self.model_name == 'vgg16':
+            self.model = models.vgg16(pretrained=True)
+            self.model = torch.nn.Sequential(*list(self.model.children())[:-1])
+            self.feature_dim = 4096
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], 
+                                   std=[0.229, 0.224, 0.225])
+            ])
+        else:
+            raise ValueError(f"Unsupported model: {self.model_name}")
+        
+        self.model.eval()
+        self.model.to(self.device)
+        print(f"Loaded {self.model_name}. Feature dimension: {self.feature_dim}")
+        
+    def extract_features(self, image_path):
+        """Extract features from a single image"""
+        try:
+            image = Image.open(image_path).convert('RGB')
+            image_tensor = self.transform(image).unsqueeze(0).to(self.device)
+            
+            with torch.no_grad():
+                features = self.model(image_tensor)
+                features = features.flatten().cpu().numpy()
+            
+            return features
+        except Exception as e:
+            print(f"Error processing {image_path}: {e}")
+            return None
+    
+    def extract_features_batch(self, image_paths, progress_callback=None):
+        """Extract features from multiple images"""
+        features = []
+        valid_paths = []
+        
+        for i, path in enumerate(image_paths):
+            if progress_callback:
+                progress_callback(i, len(image_paths))
+            
+            feat = self.extract_features(path)
+            if feat is not None:
+                features.append(feat)
+                valid_paths.append(path)
+        
+        if not features:
+            return np.array([]), []
+        
+        return np.array(features), valid_paths
 
 class ModelTrainer:
     def __init__(self):
@@ -62,8 +155,12 @@ class ModelTrainer:
         self.training_history = []
         self.has_test_labels = False
         self.test_is_empty = False
-        self.eval_type = 'test'
+        self.eval_type = 'test'  # 'test' or 'validation'
+        self.eval_message = ''   # Message explaining why validation is used
         self.last_evaluation_results = None
+        self.image_extractor = None
+        self.is_image_task = False
+        self.image_folder = None
         
     def _handle_missing_values(self, df, name="data"):
         """Handle missing values in dataframe"""
@@ -79,6 +176,8 @@ class ModelTrainer:
                 if df[col].dtype in ['float64', 'int64']:
                     if df[col].isna().any():
                         mean_val = df[col].mean()
+                        if pd.isna(mean_val):
+                            mean_val = 0
                         df[col].fillna(mean_val, inplace=True)
                         print(f"Filled NaN in {col} with mean: {mean_val:.4f}")
                 elif df[col].dtype == 'object':
@@ -110,12 +209,17 @@ class ModelTrainer:
                 try:
                     X[col] = pd.to_numeric(X[col], errors='coerce')
                     if X[col].isna().any():
-                        X[col].fillna(X[col].mean(), inplace=True)
+                        X[col].fillna(X[col].mean() if not pd.isna(X[col].mean()) else 0, inplace=True)
                 except:
                     print(f"Warning: Could not convert {col} to numeric, using label encoding")
                     from sklearn.preprocessing import LabelEncoder
                     le = LabelEncoder()
                     X[col] = le.fit_transform(X[col].astype(str))
+        
+        if isinstance(X, pd.DataFrame):
+            if X.isna().sum().sum() > 0:
+                print(f"WARNING: Found remaining NaN in {name}, filling with 0")
+                X = X.fillna(0)
         
         if y is not None:
             if isinstance(y, pd.Series):
@@ -124,10 +228,74 @@ class ModelTrainer:
                     valid_idx = ~y.isna()
                     X = X[valid_idx]
                     y = y[valid_idx]
+                if y.dtype == 'object':
+                    try:
+                        y = pd.to_numeric(y, errors='coerce')
+                        if y.isna().any():
+                            print(f"Warning: Could not convert target to numeric, using label encoding")
+                            from sklearn.preprocessing import LabelEncoder
+                            le = LabelEncoder()
+                            y = le.fit_transform(y.astype(str))
+                    except:
+                        from sklearn.preprocessing import LabelEncoder
+                        le = LabelEncoder()
+                        y = le.fit_transform(y.astype(str))
         
         return X, y
     
-    def load_data(self, xlsx_file):
+    def _extract_image_features(self, df, image_folder):
+        """Extract image features from dataframe with image names"""
+        print("=== EXTRACTING IMAGE FEATURES ===")
+        
+        if self.image_extractor is None:
+            self.image_extractor = ImageFeatureExtractor('resnet50')
+        
+        image_col = df.columns[1]
+        image_names = df[image_col].tolist()
+        
+        image_paths = []
+        valid_indices = []
+        
+        for i, name in enumerate(image_names):
+            name_str = str(name).strip()
+            found = False
+            for ext in ['', '.jpg', '.jpeg', '.png', '.JPG', '.JPEG', '.PNG']:
+                path = os.path.join(image_folder, name_str + ext)
+                if os.path.exists(path):
+                    image_paths.append(path)
+                    valid_indices.append(i)
+                    found = True
+                    break
+            if not found:
+                print(f"Warning: Image not found: {name_str}")
+        
+        if not image_paths:
+            raise ValueError(f"No images found in {image_folder}. Check image names and folder.")
+        
+        print(f"Found {len(image_paths)} images out of {len(image_names)} samples")
+        
+        features, valid_paths = self.image_extractor.extract_features_batch(image_paths)
+        
+        if len(features) == 0:
+            raise ValueError("Failed to extract features from any images")
+        
+        valid_df = df.iloc[valid_indices].copy()
+        valid_df['image_path'] = valid_paths
+        
+        feature_names = [f'feat_{i}' for i in range(features.shape[1])]
+        feature_df = pd.DataFrame(features, columns=feature_names, index=valid_df.index)
+        
+        result_df = pd.concat([valid_df[[df.columns[0], df.columns[-1]]], feature_df], axis=1)
+        
+        if result_df.isna().sum().sum() > 0:
+            print("WARNING: NaN in extracted features, filling with 0")
+            result_df = result_df.fillna(0)
+        
+        print(f"Extracted {features.shape[1]} features from {len(valid_paths)} images")
+        
+        return result_df, feature_names
+    
+    def load_data(self, xlsx_file, image_folder=None, model_name='resnet50'):
         """Load data from Excel file with three worksheets: Train, Val, Test"""
         try:
             print("=== LOADING DATA ===")
@@ -153,56 +321,71 @@ class ModelTrainer:
             print(f"Val shape: {val_df.shape}")
             print(f"Test shape: {test_df.shape}")
             
-            for df, name in [(train_df, 'Train'), (val_df, 'Val'), (test_df, 'Test')]:
-                if df.shape[1] < 3:
-                    raise ValueError(f"{name} sheet must have at least 3 columns (Sample ID, features, target)")
+            self.is_image_task = image_folder is not None and os.path.exists(image_folder)
             
-            self.sample_id_col = train_df.columns[0]
-            print(f"Sample ID column: {self.sample_id_col}")
-            
-            feature_cols = train_df.columns[1:-1].tolist()
-            self.target_name = train_df.columns[-1]
-            
-            print(f"Feature columns: {feature_cols}")
-            print(f"Target column: {self.target_name}")
-            
-            X_train = train_df[feature_cols].copy()
-            y_train = train_df[self.target_name].copy()
-            
-            X_val = val_df[feature_cols].copy()
-            y_val = val_df[self.target_name].copy()
-            
-            test_cols = test_df.columns.tolist()
-            if len(test_cols) > len(feature_cols) + 1:
-                self.has_test_labels = True
-                X_test = test_df[feature_cols].copy()
-                y_test = test_df[self.target_name].copy()
-                test_sample_ids = test_df[self.sample_id_col].copy()
+            if self.is_image_task:
+                print(f"Processing as IMAGE CLASSIFICATION task. Image folder: {image_folder}")
+                self.image_folder = image_folder
                 
-                if y_test.isna().all() or (y_test.dtype == 'object' and y_test.str.strip().eq('').all()):
-                    self.test_is_empty = True
-                    self.has_test_labels = False
-                    print(f"Test target column '{self.target_name}' is empty - treating as no labels")
-                else:
-                    self.test_is_empty = False
-                    print(f"Test has labels in column '{self.target_name}'")
+                train_df, feature_names = self._extract_image_features(train_df, image_folder)
+                val_df, _ = self._extract_image_features(val_df, image_folder)
+                test_df, _ = self._extract_image_features(test_df, image_folder)
+                
+                self.feature_names = feature_names
+                self.sample_id_col = train_df.columns[0]
+                self.target_name = train_df.columns[-1]
             else:
-                self.has_test_labels = False
-                self.test_is_empty = True
-                X_test = test_df[feature_cols].copy()
-                y_test = None
-                test_sample_ids = test_df[self.sample_id_col].copy()
-                print("Test has no target column")
+                self.sample_id_col = train_df.columns[0]
+                feature_cols = train_df.columns[1:-1].tolist()
+                self.feature_names = feature_cols
+                self.target_name = train_df.columns[-1]
+                
+                print(f"Processing as TABULAR data. Features: {self.feature_names}")
             
-            self.feature_names = feature_cols
+            if self.is_image_task:
+                X_train = train_df.iloc[:, 2:-1]
+                y_train = train_df.iloc[:, -1]
+                
+                X_val = val_df.iloc[:, 2:-1]
+                y_val = val_df.iloc[:, -1]
+                
+                test_cols = test_df.shape[1]
+                if test_cols > 3:
+                    self.has_test_labels = True
+                    X_test = test_df.iloc[:, 2:-1]
+                    y_test = test_df.iloc[:, -1]
+                    test_sample_ids = test_df.iloc[:, 0]
+                else:
+                    self.has_test_labels = False
+                    X_test = test_df.iloc[:, 2:]
+                    y_test = None
+                    test_sample_ids = test_df.iloc[:, 0]
+            else:
+                X_train = train_df.iloc[:, 1:-1]
+                y_train = train_df.iloc[:, -1]
+                
+                X_val = val_df.iloc[:, 1:-1]
+                y_val = val_df.iloc[:, -1]
+                
+                test_cols = test_df.shape[1]
+                if test_cols > len(self.feature_names) + 1:
+                    self.has_test_labels = True
+                    X_test = test_df.iloc[:, 1:-1]
+                    y_test = test_df.iloc[:, -1]
+                    test_sample_ids = test_df.iloc[:, 0]
+                else:
+                    self.has_test_labels = False
+                    X_test = test_df.iloc[:, 1:]
+                    y_test = None
+                    test_sample_ids = test_df.iloc[:, 0]
             
             X_train, y_train = self._validate_data(X_train, y_train, "Train")
             X_val, y_val = self._validate_data(X_val, y_val, "Val")
             X_test, _ = self._validate_data(X_test, None, "Test")
             
-            print(f"X_train columns: {X_train.columns.tolist()}")
-            print(f"X_val columns: {X_val.columns.tolist()}")
-            print(f"X_test columns: {X_test.columns.tolist()}")
+            print(f"X_train shape: {X_train.shape}")
+            print(f"X_val shape: {X_val.shape}")
+            print(f"X_test shape: {X_test.shape}")
             
             y_train_series = y_train
             if y_train_series.dtype == 'object' or len(y_train_series.unique()) < 10:
@@ -231,16 +414,12 @@ class ModelTrainer:
                 self.task_type = 'regression'
                 print("Task type: REGRESSION")
             
-            print("\nFinal validation - checking for any remaining NaN values...")
-            print(f"X_train NaN count: {X_train.isna().sum().sum()}")
-            print(f"X_val NaN count: {X_val.isna().sum().sum()}")
-            print(f"X_test NaN count: {X_test.isna().sum().sum()}")
-            
-            if X_train.isna().sum().sum() > 0:
-                print("WARNING: NaN values still present in X_train! Doing aggressive cleaning...")
-                X_train = X_train.fillna(0)
-                X_val = X_val.fillna(0)
-                X_test = X_test.fillna(0)
+            # Aggressive cleaning for all data
+            for name, data in [('X_train', X_train), ('X_val', X_val), ('X_test', X_test)]:
+                if data.isna().sum().sum() > 0:
+                    print(f"WARNING: NaN in {name}, filling with 0")
+                    data.fillna(0, inplace=True)
+                    data_store[name] = data
             
             data_store['X_train'] = X_train
             data_store['X_val'] = X_val
@@ -248,13 +427,21 @@ class ModelTrainer:
             data_store['y_train'] = y_train
             data_store['y_val'] = y_val
             data_store['y_test'] = y_test
-            data_store['train_sample_ids'] = train_df[self.sample_id_col].copy()
-            data_store['val_sample_ids'] = val_df[self.sample_id_col].copy()
+            data_store['train_sample_ids'] = train_df.iloc[:, 0]
+            data_store['val_sample_ids'] = val_df.iloc[:, 0]
             data_store['test_sample_ids'] = test_sample_ids
             data_store['feature_names'] = self.feature_names
             data_store['target_name'] = self.target_name
             data_store['task_type'] = self.task_type
             data_store['has_test_labels'] = self.has_test_labels
+            data_store['is_image_task'] = self.is_image_task
+            data_store['image_folder'] = self.image_folder
+            
+            # Set evaluation type message
+            if not self.has_test_labels:
+                self.eval_message = "Test set has no ground truth labels. Evaluation shown using Validation set."
+            else:
+                self.eval_message = "Evaluation using Test set."
             
             print("=== DATA LOADED SUCCESSFULLY ===")
             
@@ -265,9 +452,10 @@ class ModelTrainer:
                 'features': X_train.shape[1],
                 'task_type': self.task_type,
                 'has_test_labels': self.has_test_labels,
-                'test_is_empty': self.test_is_empty,
+                'is_image_task': self.is_image_task,
                 'feature_names': self.feature_names,
-                'target_name': self.target_name
+                'target_name': self.target_name,
+                'eval_message': self.eval_message
             }
         except Exception as e:
             print(f"ERROR in load_data: {str(e)}")
@@ -275,28 +463,24 @@ class ModelTrainer:
             raise
     
     def _process_dnn_params(self, params):
-        """Process DNN parameters to correct types with proper defaults"""
+        """Process DNN parameters to correct types"""
         processed_params = {}
         
-        # Define defaults for DNN parameters
         defaults = {
-            'hidden_layer_sizes': (100, 50),  # Default: two hidden layers with 100 and 50 neurons
+            'hidden_layer_sizes': (100, 50),
             'max_iter': 200,
             'alpha': 0.0001,
             'learning_rate_init': 0.001,
             'random_state': 42
         }
         
-        # Start with defaults
         for key, default_value in defaults.items():
             processed_params[key] = default_value
         
-        # Override with provided parameters
         for key, value in params.items():
             if key == 'hidden_layer_sizes':
                 if isinstance(value, str):
                     try:
-                        # Parse string like "100,50" or "100"
                         layers = [int(x.strip()) for x in value.split(',') if x.strip()]
                         if len(layers) == 1:
                             processed_params['hidden_layer_sizes'] = layers[0]
@@ -320,18 +504,13 @@ class ModelTrainer:
                     processed_params['max_iter'] = int(value)
                 except:
                     processed_params['max_iter'] = defaults['max_iter']
-            elif key == 'learning_rate_init':
-                try:
-                    processed_params['learning_rate_init'] = float(value)
-                except:
-                    processed_params['learning_rate_init'] = defaults['learning_rate_init']
             else:
                 processed_params[key] = value
         
-        print(f"Final DNN params: {processed_params}")
         return processed_params
     
     def train_model(self, model_name, **params):
+        """Train the selected model"""
         print("=== TRAINING MODEL ===")
         print(f"Model: {model_name}")
         print(f"Original Params: {params}")
@@ -341,19 +520,16 @@ class ModelTrainer:
             if self.task_type not in ['classification', 'regression']:
                 raise ValueError(f"Task type not set. Current: {self.task_type}")
             
-            # Process DNN parameters if needed
             if model_name == 'DNN':
                 params = self._process_dnn_params(params)
                 print(f"Processed DNN Params: {params}")
             
-            # Get the correct model class
             model_key = 'class' if self.task_type == 'classification' else 'reg'
             print(f"Looking for model with key: {model_key}")
             
             model_class = self.models[model_name][model_key]
             print(f"Model class: {model_class}")
             
-            # For SVM, handle probability for classification
             if model_name == 'SVM' and self.task_type == 'classification':
                 if 'probability' not in params:
                     params['probability'] = True
@@ -363,8 +539,8 @@ class ModelTrainer:
             self.model = model_class(**params)
             print("Model instantiated")
             
-            X_train = data_store['X_train']
-            X_val = data_store['X_val']
+            X_train = data_store['X_train'].copy()
+            X_val = data_store['X_val'].copy()
             
             if X_train.isna().sum().sum() > 0:
                 print(f"WARNING: Found {X_train.isna().sum().sum()} NaN in X_train, filling with 0")
@@ -390,12 +566,19 @@ class ModelTrainer:
                 print("WARNING: NaN found after scaling! Replacing with 0")
                 X_val_scaled = np.nan_to_num(X_val_scaled)
             
+            y_train = data_store['y_train']
+            if isinstance(y_train, pd.Series):
+                if y_train.isna().any():
+                    print("WARNING: NaN in y_train, filling with 0")
+                    y_train = y_train.fillna(0)
+                    data_store['y_train'] = y_train
+            
             print("Training model...")
-            self.model.fit(X_train_scaled, data_store['y_train'])
+            self.model.fit(X_train_scaled, y_train)
             print("Model trained")
             
             print("Calculating scores...")
-            train_score = self.model.score(X_train_scaled, data_store['y_train'])
+            train_score = self.model.score(X_train_scaled, y_train)
             val_score = self.model.score(X_val_scaled, data_store['y_val'])
             print(f"Train score: {train_score}")
             print(f"Val score: {val_score}")
@@ -432,24 +615,29 @@ class ModelTrainer:
             raise
     
     def evaluate_model(self):
+        """Evaluate the trained model - uses test if available, otherwise validation"""
         print("=== EVALUATING MODEL ===")
         try:
             if self.model is None:
                 raise ValueError("No model trained yet.")
             
+            # Determine which dataset to use
             use_test = data_store['has_test_labels'] and data_store['y_test'] is not None
             
             if use_test:
                 print("Using TEST set for evaluation")
-                X_eval = data_store['X_test']
+                X_eval = data_store['X_test'].copy()
                 y_true = data_store['y_test']
                 self.eval_type = 'test'
+                eval_message = "Evaluation using Test Set"
             else:
                 print("Using VALIDATION set for evaluation (test has no labels)")
-                X_eval = data_store['X_val']
+                X_eval = data_store['X_val'].copy()
                 y_true = data_store['y_val']
                 self.eval_type = 'validation'
+                eval_message = "⚠️ Test set has no ground truth. Evaluation using Validation Set"
             
+            # Clean evaluation data
             if X_eval.isna().sum().sum() > 0:
                 print(f"WARNING: Found NaN in {self.eval_type} data, filling with 0")
                 X_eval = X_eval.fillna(0)
@@ -471,6 +659,7 @@ class ModelTrainer:
             
             self.last_evaluation_results = {
                 'eval_type': self.eval_type,
+                'eval_message': eval_message,
                 'predictions': y_pred.tolist(),
                 'y_true': y_true.tolist()
             }
@@ -486,6 +675,11 @@ class ModelTrainer:
                 ax.set_ylabel('True')
                 ax.set_title(f'Confusion Matrix - {self.eval_type.capitalize()} Set')
                 
+                # Add subtitle if using validation
+                if self.eval_type == 'validation':
+                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set', 
+                               ha='center', fontsize=10, color='orange')
+                
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
                 buf.seek(0)
@@ -495,6 +689,7 @@ class ModelTrainer:
                 result = {
                     'has_labels': True,
                     'eval_type': self.eval_type,
+                    'eval_message': eval_message,
                     'accuracy': accuracy,
                     'classification_report': report,
                     'confusion_matrix_img': conf_matrix_img,
@@ -505,24 +700,38 @@ class ModelTrainer:
                 return result
                 
             else:  # regression
-                mse = mean_squared_error(y_true, y_pred)
+                y_true_clean = np.nan_to_num(y_true)
+                y_pred_clean = np.nan_to_num(y_pred)
+                
+                mse = mean_squared_error(y_true_clean, y_pred_clean)
                 rmse = np.sqrt(mse)
-                mae = mean_absolute_error(y_true, y_pred)
-                r2 = r2_score(y_true, y_pred)
+                mae = mean_absolute_error(y_true_clean, y_pred_clean)
+                r2 = r2_score(y_true_clean, y_pred_clean)
                 
                 # Line plot
                 fig, ax = plt.subplots(figsize=(10, 6))
-                sorted_idx = np.argsort(y_true)
-                y_true_sorted = y_true[sorted_idx]
-                y_pred_sorted = y_pred[sorted_idx]
+                sorted_idx = np.argsort(y_true_clean)
+                y_true_sorted = y_true_clean[sorted_idx]
+                y_pred_sorted = y_pred_clean[sorted_idx]
                 
                 ax.plot(range(len(y_true_sorted)), y_true_sorted, 'b-', label='Actual', linewidth=2)
                 ax.plot(range(len(y_pred_sorted)), y_pred_sorted, 'r--', label='Predicted', linewidth=2)
                 ax.set_xlabel('Sample Index')
                 ax.set_ylabel('Value')
-                ax.set_title(f'Predictions vs Actual - {self.eval_type.capitalize()} Set')
+                
+                # Title with clear indication
+                if self.eval_type == 'validation':
+                    ax.set_title(f'Predictions vs Actual - Validation Set ⚠️ (Test has no ground truth)')
+                else:
+                    ax.set_title(f'Predictions vs Actual - {self.eval_type.capitalize()} Set')
+                
                 ax.legend()
                 ax.grid(True, alpha=0.3)
+                
+                # Add note if using validation
+                if self.eval_type == 'validation':
+                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set for evaluation', 
+                               ha='center', fontsize=10, color='orange')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -532,12 +741,21 @@ class ModelTrainer:
                 
                 # Scatter plot
                 fig, ax = plt.subplots(figsize=(8, 6))
-                ax.scatter(y_true, y_pred, alpha=0.6)
-                ax.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
+                ax.scatter(y_true_clean, y_pred_clean, alpha=0.6)
+                ax.plot([y_true_clean.min(), y_true_clean.max()], [y_true_clean.min(), y_true_clean.max()], 'r--', lw=2)
                 ax.set_xlabel('Actual Values')
                 ax.set_ylabel('Predicted Values')
-                ax.set_title(f'Scatter Plot - {self.eval_type.capitalize()} Set')
+                
+                if self.eval_type == 'validation':
+                    ax.set_title(f'Scatter Plot - Validation Set ⚠️ (Test has no ground truth)')
+                else:
+                    ax.set_title(f'Scatter Plot - {self.eval_type.capitalize()} Set')
+                
                 ax.grid(True, alpha=0.3)
+                
+                if self.eval_type == 'validation':
+                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set', 
+                               ha='center', fontsize=10, color='orange')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -546,14 +764,23 @@ class ModelTrainer:
                 plt.close()
                 
                 # Residual plot
-                residuals = y_true - y_pred
+                residuals = y_true_clean - y_pred_clean
                 fig, ax = plt.subplots(figsize=(8, 6))
-                ax.scatter(y_pred, residuals, alpha=0.6)
+                ax.scatter(y_pred_clean, residuals, alpha=0.6)
                 ax.axhline(y=0, color='r', linestyle='--', lw=2)
                 ax.set_xlabel('Predicted Values')
                 ax.set_ylabel('Residuals')
-                ax.set_title(f'Residual Plot - {self.eval_type.capitalize()} Set')
+                
+                if self.eval_type == 'validation':
+                    ax.set_title(f'Residual Plot - Validation Set ⚠️ (Test has no ground truth)')
+                else:
+                    ax.set_title(f'Residual Plot - {self.eval_type.capitalize()} Set')
+                
                 ax.grid(True, alpha=0.3)
+                
+                if self.eval_type == 'validation':
+                    plt.figtext(0.5, 0.01, '⚠️ Test set has no ground truth - using Validation set', 
+                               ha='center', fontsize=10, color='orange')
                 
                 buf = io.BytesIO()
                 plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
@@ -564,6 +791,7 @@ class ModelTrainer:
                 result = {
                     'has_labels': True,
                     'eval_type': self.eval_type,
+                    'eval_message': eval_message,
                     'mse': mse,
                     'rmse': rmse,
                     'mae': mae,
@@ -571,8 +799,8 @@ class ModelTrainer:
                     'line_plot_img': line_plot_img,
                     'scatter_img': scatter_img,
                     'residuals_img': residuals_img,
-                    'predictions': y_pred.tolist(),
-                    'y_true': y_true.tolist()
+                    'predictions': y_pred_clean.tolist(),
+                    'y_true': y_true_clean.tolist()
                 }
                 self.last_evaluation_results.update(result)
                 return result
@@ -625,7 +853,7 @@ class ModelTrainer:
             predictions = data_store['test_predictions']
             has_actual = True
             actual = data_store['y_val']
-            eval_type = "validation"
+            eval_type = "validation ⚠️ (no test labels)"
         
         if self.task_type == 'classification':
             predictions_decoded = self.label_encoder.inverse_transform(predictions.astype(int))
@@ -688,7 +916,26 @@ def upload_file():
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
-        data_info = trainer.load_data(filepath)
+        image_folder = None
+        if 'images' in request.files:
+            image_file = request.files['images']
+            if image_file and image_file.filename != '':
+                if image_file.filename.endswith('.zip'):
+                    zip_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(image_file.filename))
+                    image_file.save(zip_path)
+                    
+                    image_folder = os.path.join(app.config['UPLOAD_FOLDER'], 'images_' + datetime.now().strftime("%Y%m%d_%H%M%S"))
+                    os.makedirs(image_folder, exist_ok=True)
+                    
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(image_folder)
+                    
+                    os.remove(zip_path)
+                    print(f"Extracted images to {image_folder}")
+                else:
+                    return jsonify({'error': 'Images must be uploaded as a ZIP file'}), 400
+        
+        data_info = trainer.load_data(filepath, image_folder)
         
         return jsonify({
             'success': True,
@@ -696,7 +943,9 @@ def upload_file():
             'feature_names': trainer.feature_names,
             'target_name': trainer.target_name,
             'has_test_labels': trainer.has_test_labels,
-            'test_is_empty': trainer.test_is_empty
+            'test_is_empty': trainer.test_is_empty,
+            'is_image_task': trainer.is_image_task,
+            'eval_message': trainer.eval_message
         })
     
     except Exception as e:
@@ -762,7 +1011,8 @@ def evaluate_model():
             'success': True,
             'results': results,
             'task_type': trainer.task_type,
-            'has_test_labels': trainer.has_test_labels
+            'has_test_labels': trainer.has_test_labels,
+            'eval_message': trainer.eval_message
         })
     
     except Exception as e:

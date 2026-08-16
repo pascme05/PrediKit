@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PrediKit - Model Training Tool</title>
+    <title>ML-Forge - Model Training Tool</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -16,6 +16,7 @@
             padding: 15px 20px; font-weight: 600;
         }
         .card-header i { margin-right: 8px; }
+        .card-header.image-header { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
         .metric-card {
             text-align: center; padding: 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -40,6 +41,29 @@
         .loading-overlay.active { display: flex; }
         .loading-spinner { background: white; padding: 30px; border-radius: 12px; text-align: center; }
         .loading-spinner i { font-size: 48px; color: #667eea; }
+        .image-upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            background: #fafafa;
+            transition: all 0.3s;
+        }
+        .image-upload-area:hover {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+        .image-upload-area i { font-size: 48px; color: #667eea; margin-bottom: 10px; }
+        .feature-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin: 2px;
+        }
+        .feature-badge.image { background: #e3f2fd; color: #1976d2; }
+        .feature-badge.tabular { background: #e8f5e9; color: #388e3c; }
     </style>
 </head>
 <body>
@@ -54,12 +78,13 @@
     <div class="container">
         <!-- Header -->
         <div class="text-center mb-4">
-            <h1><i class="fas fa-hammer" style="color: #667eea;"></i> <span class="logo-text">PrediKit</span></h1>
-            <p class="text-muted">Forge powerful machine learning models with ease</p>
+            <h1><i class="fas fa-hammer" style="color: #667eea;"></i> <span class="logo-text">ML-Forge</span></h1>
+            <p class="text-muted">Forge powerful machine learning models with ease - Now with Image Classification!</p>
             <div class="d-flex justify-content-center gap-2 flex-wrap">
                 <span class="badge bg-primary">Classification</span>
                 <span class="badge bg-success">Regression</span>
-                <span class="badge bg-info">3-Worksheet Format</span>
+                <span class="badge bg-info">Tabular Data</span>
+                <span class="badge bg-danger">🖼️ Image Classification</span>
                 <span class="badge bg-warning text-dark">Train / Val / Test</span>
             </div>
         </div>
@@ -72,19 +97,45 @@
                     <div class="card-body">
                         <div class="alert alert-info">
                             <i class="fas fa-info-circle"></i> 
-                            Excel file with three worksheets: <strong>Train</strong>, <strong>Val</strong>, and <strong>Test</strong>.
-                            <br>Each worksheet: <strong>Sample ID</strong> (first column), <strong>Features</strong> (middle), <strong>Target</strong> (last column - optional for Test).
+                            <strong>Tabular Data:</strong> Excel file with three worksheets: <strong>Train</strong>, <strong>Val</strong>, and <strong>Test</strong>.
+                            <br><strong>Image Classification:</strong> Excel file + ZIP file containing images.
+                            <br>Each worksheet: <strong>Sample ID</strong> (first column), <strong>Features/Image Name</strong> (middle), <strong>Target</strong> (last column - optional for Test).
                         </div>
                         
                         <form id="uploadForm" enctype="multipart/form-data">
-                            <div class="row align-items-end">
-                                <div class="col-md-8">
+                            <div class="row">
+                                <div class="col-md-6">
                                     <div class="mb-3">
                                         <label for="fileInput" class="form-label fw-bold">Excel File (.xlsx)</label>
                                         <input type="file" class="form-control" id="fileInput" name="file" accept=".xlsx,.xls" required>
                                     </div>
                                 </div>
-                                <div class="col-md-4">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="imageInput" class="form-label fw-bold">
+                                            <i class="fas fa-image"></i> Images ZIP (optional)
+                                        </label>
+                                        <input type="file" class="form-control" id="imageInput" name="images" accept=".zip">
+                                        <small class="text-muted">ZIP file containing images for image classification</small>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label for="imageModelSelect" class="form-label fw-bold">
+                                            <i class="fas fa-brain"></i> Feature Extraction Model
+                                        </label>
+                                        <select class="form-select" id="imageModelSelect">
+                                            <option value="resnet50">🔄 ResNet50 (Balanced)</option>
+                                            <option value="resnet18">⚡ ResNet18 (Fast)</option>
+                                            <option value="vgg16">🎯 VGG16 (Accurate)</option>
+                                        </select>
+                                        <small class="text-muted">Only used for image classification tasks</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
                                     <div class="mb-3">
                                         <label class="form-label fw-bold">&nbsp;</label>
                                         <button type="submit" class="btn btn-primary w-100" id="uploadBtn">
@@ -111,8 +162,8 @@
                             <div class="mb-3">
                                 <label for="modelSelect" class="form-label fw-bold">Select Model</label>
                                 <select class="form-select" id="modelSelect" required>
+                                    <option value="RF">🌲 Random Forest</option>
                                     <option value="DT">🌳 Decision Tree</option>
-                                    <option value="RF" selected>🌲 Random Forest</option>
                                     <option value="SVM">📊 SVM</option>
                                     <option value="DNN">🧠 Neural Network</option>
                                 </select>
@@ -239,6 +290,7 @@
 
         let featureNames = [];
         let isModelTrained = false;
+        let isImageTask = false;
 
         // Show/hide loading overlay
         function showLoading(show) {
@@ -331,16 +383,22 @@
                 }
                 
                 featureNames = data.feature_names;
+                isImageTask = data.is_image_task || false;
                 
                 const infoDiv = document.getElementById('dataInfo');
                 infoDiv.style.display = 'block';
+                
+                const taskBadge = data.data_info.task_type === 'classification' ? 'info' : 'success';
+                const dataType = isImageTask ? '🖼️ Image' : '📊 Tabular';
+                const dataTypeBadge = isImageTask ? 'danger' : 'primary';
+                
                 infoDiv.innerHTML = `
                     <div class="alert alert-success">
                         <div class="row">
-                            <div class="col-md-3"><strong>📊 Task:</strong> <span class="badge bg-${data.data_info.task_type === 'classification' ? 'info' : 'success'}">${data.data_info.task_type}</span></div>
+                            <div class="col-md-3"><strong>📊 Task:</strong> <span class="badge bg-${taskBadge}">${data.data_info.task_type}</span></div>
                             <div class="col-md-3"><strong>🔢 Features:</strong> ${data.data_info.features}</div>
                             <div class="col-md-3"><strong>🎯 Target:</strong> <span class="badge bg-secondary">${data.target_name}</span></div>
-                            <div class="col-md-3"><strong>📋 Test Labels:</strong> ${data.has_test_labels ? '✅ Available' : '⚠️ Not Available (using Validation)'}</div>
+                            <div class="col-md-3"><strong>📋 Data Type:</strong> <span class="badge bg-${dataTypeBadge}">${dataType}</span></div>
                         </div>
                         <div class="row mt-2">
                             <div class="col-md-4"><strong>📘 Train:</strong> ${data.data_info.samples_train} samples</div>
@@ -348,7 +406,12 @@
                             <div class="col-md-4"><strong>📕 Test:</strong> ${data.data_info.samples_test} samples</div>
                         </div>
                         <div class="row mt-2">
-                            <div class="col-md-12"><small class="text-muted">Features: ${data.feature_names.join(', ')}</small></div>
+                            <div class="col-md-12">
+                                <small class="text-muted">
+                                    <i class="fas fa-tag"></i> 
+                                    ${data.data_info.feature_names ? data.data_info.feature_names.slice(0, 5).join(', ') + (data.data_info.feature_names.length > 5 ? '...' : '') : 'No features'}
+                                </small>
+                            </div>
                         </div>
                     </div>
                 `;
@@ -370,7 +433,16 @@
             const container = document.getElementById('featureInputs');
             container.innerHTML = '';
             
-            names.forEach((name, index) => {
+            if (!names || names.length === 0) {
+                container.innerHTML = '<p class="text-muted">No features available</p>';
+                return;
+            }
+            
+            // Show first 10 features, or all if less
+            const displayNames = names.length > 10 ? names.slice(0, 10) : names;
+            const hasMore = names.length > 10;
+            
+            displayNames.forEach((name, index) => {
                 const div = document.createElement('div');
                 div.className = 'mb-2';
                 
@@ -390,6 +462,13 @@
                 div.appendChild(input);
                 container.appendChild(div);
             });
+            
+            if (hasMore) {
+                const div = document.createElement('div');
+                div.className = 'text-muted small mt-2';
+                div.textContent = `... and ${names.length - 10} more features (not shown)`;
+                container.appendChild(div);
+            }
         }
 
         // Train handler
@@ -399,15 +478,12 @@
             const modelName = document.getElementById('modelSelect').value;
             const params = {};
             
-            // Get all parameter inputs (both number and text)
             const paramInputs = document.querySelectorAll('#paramInputs input, #paramInputs select');
             paramInputs.forEach(input => {
                 let value = input.value;
-                // For number inputs, parse as float
                 if (input.type === 'number') {
                     value = parseFloat(value);
                 }
-                // For text inputs like hidden_layer_sizes, keep as string
                 params[input.name] = value;
             });
             
@@ -455,7 +531,6 @@
                 
                 isModelTrained = true;
                 
-                // Evaluate model
                 await evaluateModel();
                 showToast('✅ Model trained successfully!', 'success');
                 
@@ -482,7 +557,6 @@
                 const results = data.results;
                 const evalType = results.eval_type || 'test';
                 
-                // Show evaluation notice
                 const notice = document.getElementById('evalNotice');
                 notice.style.display = 'block';
                 if (evalType === 'validation') {
@@ -505,7 +579,31 @@
 
         function displayMetrics(results, taskType) {
             const container = document.getElementById('metricsContent');
-            let html = '<div class="row">';
+            const evalType = results.eval_type || 'test';
+            const evalMessage = results.eval_message || '';
+            
+            // Show evaluation type banner
+            let banner = '';
+            if (evalType === 'validation') {
+                banner = `
+                    <div class="alert alert-warning mb-3">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <strong>⚠️ Test set has no ground truth labels.</strong>
+                        <br>Showing evaluation metrics using the <strong>Validation set</strong>.
+                        ${evalMessage ? '<br><small>' + evalMessage + '</small>' : ''}
+                    </div>
+                `;
+            } else {
+                banner = `
+                    <div class="alert alert-success mb-3">
+                        <i class="fas fa-check-circle"></i>
+                        <strong>✅ Evaluation using Test set</strong>
+                        ${evalMessage ? '<br><small>' + evalMessage + '</small>' : ''}
+                    </div>
+                `;
+            }
+            
+            let html = banner;
             
             if (taskType === 'classification') {
                 html += `
@@ -558,7 +656,6 @@
             }
             html += '</div>';
             
-            // Add classification report if available
             if (taskType === 'classification' && results.classification_report) {
                 const report = results.classification_report;
                 const classEntries = Object.entries(report).filter(([k,v]) => 

@@ -6,3 +6,6 @@ matplotlib==3.7.2
 seaborn==0.12.2
 openpyxl==3.1.2
 werkzeug==2.3.6
+Pillow==10.0.0
+torch==2.0.1
+torchvision==0.15.2
