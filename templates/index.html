@@ -554,23 +554,39 @@
                     return;
                 }
                 
-                const results = data.results;
-                const evalType = results.eval_type || 'test';
+                // CRITICAL: Log what we're getting
+                console.log('Evaluate response:', data);
+                console.log('eval_type:', data.results.eval_type);
+                console.log('has_test_labels:', data.has_test_labels);
                 
+                const results = data.results;
+                const evalType = results.eval_type || 'test'; // Get from results
+                
+                // Show evaluation notice
                 const notice = document.getElementById('evalNotice');
                 notice.style.display = 'block';
                 if (evalType === 'validation') {
-                    notice.innerHTML = '⚠️ <strong>Evaluation using Validation Set</strong> (Test set has no labels or is empty)';
+                    notice.innerHTML = `
+                        <i class="fas fa-exclamation-triangle" style="color: #ff6b00;"></i>
+                        <strong style="color: #ff6b00;">⚠️ Test set has no ground truth labels</strong>
+                        <br>Showing evaluation metrics using the <strong>Validation set</strong>
+                        <br><small class="text-muted">The model was not trained on validation data, so this is a fair evaluation of generalization.</small>
+                    `;
                     notice.className = 'eval-notice';
+                    notice.style.borderLeftColor = '#ff6b00';
+                    notice.style.background = '#fff3cd';
                 } else {
-                    notice.innerHTML = '✅ <strong>Evaluation using Test Set</strong>';
+                    notice.innerHTML = `
+                        <i class="fas fa-check-circle" style="color: #28a745;"></i>
+                        <strong>✅ Evaluation using Test set</strong>
+                    `;
                     notice.className = 'eval-notice';
                     notice.style.borderLeftColor = '#28a745';
                     notice.style.background = '#d4edda';
                 }
                 
                 displayMetrics(results, data.task_type);
-                displayVisualizations(results, data.task_type, evalType);
+                displayVisualizations(results, data.task_type, evalType); // Pass evalType
                 
             } catch (error) {
                 alert('❌ Error evaluating model: ' + error.message);
@@ -694,55 +710,56 @@
 
         function displayVisualizations(results, taskType, evalType) {
             const container = document.getElementById('visualizationContent');
-            const evalLabel = evalType.charAt(0).toUpperCase() + evalType.slice(1);
+            
+            // CRITICAL: Use the evalType from the response
+            const actualEvalType = results.eval_type || evalType || 'test';
+            const evalLabel = actualEvalType.charAt(0).toUpperCase() + actualEvalType.slice(1);
+            const isValidation = actualEvalType === 'validation';
+            
+            console.log('Displaying visualizations for:', actualEvalType); // Debug
             
             let html = '';
             
             // Show evaluation type banner
-            if (evalType === 'validation') {
+            if (isValidation) {
                 html += `
-                    <div class="alert alert-warning mb-3">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <strong>⚠️ Test set has no ground truth labels</strong>
+                    <div class="alert alert-warning mb-3" style="border-left: 4px solid #ff6b00;">
+                        <i class="fas fa-exclamation-triangle" style="color: #ff6b00;"></i>
+                        <strong style="color: #ff6b00;">⚠️ Test set has no ground truth labels</strong>
                         <br>Showing evaluation plots using the <strong>Validation set</strong>
                         <br><small class="text-muted">The model was not trained on validation data, so this is a fair evaluation of generalization.</small>
                     </div>
                 `;
             } else {
                 html += `
-                    <div class="alert alert-success mb-3">
-                        <i class="fas fa-check-circle"></i>
+                    <div class="alert alert-success mb-3" style="border-left: 4px solid #28a745;">
+                        <i class="fas fa-check-circle" style="color: #28a745;"></i>
                         <strong>✅ Evaluation using Test set</strong>
                     </div>
                 `;
             }
             
+            // Determine which image to show based on task type
             if (taskType === 'classification' && results.confusion_matrix_img) {
                 html += `
                     <div class="text-center">
-                        <h6>${evalType === 'validation' ? '⚠️ ' : ''}Confusion Matrix - ${evalLabel} Set</h6>
+                        <h6>${isValidation ? '⚠️ ' : ''}Confusion Matrix - ${evalLabel} Set</h6>
                         <img src="data:image/png;base64,${results.confusion_matrix_img}" class="img-fluid rounded shadow" style="max-width: 100%;">
-                        ${evalType === 'validation' ? '<p class="text-warning mt-2"><small>⚠️ Using Validation set (Test has no labels)</small></p>' : ''}
+                        ${isValidation ? '<p class="text-warning mt-2"><strong>⚠️ Using Validation set</strong> (Test has no labels)</p>' : ''}
                     </div>
                 `;
-            } else if (taskType === 'regression') {
-                if (results.combined_plot_img) {
-                    html += `
-                        <div class="row">
-                            <div class="col-md-12">
-                                <div class="text-center">
-                                    <h6>${evalType === 'validation' ? '⚠️ ' : ''}Regression Analysis - ${evalLabel} Set</h6>
-                                    <img src="data:image/png;base64,${results.combined_plot_img}" class="img-fluid rounded shadow">
-                                    ${evalType === 'validation' ? '<p class="text-warning mt-2"><small>⚠️ Using Validation set (Test has no labels)</small></p>' : ''}
-                                </div>
+            } else if (taskType === 'regression' && results.combined_plot_img) {
+                html += `
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="text-center">
+                                <h6>${isValidation ? '⚠️ ' : ''}Regression Analysis - ${evalLabel} Set</h6>
+                                <img src="data:image/png;base64,${results.combined_plot_img}" class="img-fluid rounded shadow">
+                                ${isValidation ? '<p class="text-warning mt-2"><strong>⚠️ Using Validation set</strong> (Test has no labels)</p>' : ''}
                             </div>
                         </div>
-                    `;
-                } else {
-                    html += `
-                        <div class="alert alert-warning">No visualization data available for regression.</div>
-                    `;
-                }
+                    </div>
+                `;
             } else {
                 html += `<div class="alert alert-info">No visualizations available for this model.</div>`;
             }
