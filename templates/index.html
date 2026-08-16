@@ -10,6 +10,7 @@
         :root {
             --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --warning-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
         }
         body { padding-top: 20px; background-color: #f8f9fa; }
         .container { max-width: 1400px; }
@@ -28,6 +29,7 @@
         }
         .card-header i { margin-right: 8px; }
         .card-header.download-header { background: var(--secondary-gradient); }
+        .card-header.warning-header { background: var(--warning-gradient); }
         .metric-card {
             text-align: center;
             padding: 20px;
@@ -82,6 +84,16 @@
         }
         .status-badge.has-labels { background: #d4edda; color: #155724; }
         .status-badge.no-labels { background: #fff3cd; color: #856404; }
+        .eval-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+        .eval-badge.test { background: #d4edda; color: #155724; }
+        .eval-badge.validation { background: #fff3cd; color: #856404; }
         .loading-overlay {
             display: none;
             position: fixed;
@@ -106,6 +118,13 @@
         .loading-spinner i {
             font-size: 48px;
             color: #667eea;
+        }
+        .eval-notice {
+            border-left: 4px solid #ffc107;
+            background-color: #fff3cd;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
         }
     </style>
 </head>
@@ -240,7 +259,7 @@
                     <div class="card-body">
                         <div class="d-grid">
                             <button class="btn btn-download" id="downloadBtn" disabled>
-                                <i class="fas fa-file-excel"></i> Download Test Predictions
+                                <i class="fas fa-file-excel"></i> Download Predictions
                             </button>
                         </div>
                         <div id="downloadInfo" class="mt-2 text-center text-muted small">
@@ -257,6 +276,13 @@
                         <i class="fas fa-chart-bar"></i> Results & Evaluation
                     </div>
                     <div class="card-body">
+                        <!-- Evaluation Notice -->
+                        <div id="evalNotice" style="display:none;" class="eval-notice">
+                            <i class="fas fa-info-circle"></i>
+                            <strong id="evalNoticeText">Evaluation using Validation Set</strong>
+                            <span id="evalNoticeDetail" class="text-muted ms-2"></span>
+                        </div>
+                        
                         <ul class="nav nav-tabs" id="resultTabs" role="tablist">
                             <li class="nav-item">
                                 <button class="nav-link active" id="metrics-tab" data-bs-toggle="tab" data-bs-target="#metrics" type="button">
@@ -339,6 +365,7 @@
 
         let isModelTrained = false;
         let hasTestLabels = false;
+        let evalType = 'test'; // 'test' or 'validation'
 
         // Show/hide loading overlay
         function showLoading(show) {
@@ -444,7 +471,7 @@
                     statusElem.textContent = '✅ Available';
                     statusElem.className = 'status-badge has-labels';
                 } else {
-                    statusElem.textContent = '⚠️ Not Available';
+                    statusElem.textContent = '⚠️ Not Available (using Validation)';
                     statusElem.className = 'status-badge no-labels';
                 }
                 
@@ -562,6 +589,24 @@
                     return;
                 }
                 
+                // Store evaluation type
+                evalType = data.results.eval_type || 'test';
+                
+                // Show evaluation notice
+                const notice = document.getElementById('evalNotice');
+                const noticeText = document.getElementById('evalNoticeText');
+                const noticeDetail = document.getElementById('evalNoticeDetail');
+                
+                if (evalType === 'validation') {
+                    notice.style.display = 'block';
+                    noticeText.textContent = '📊 Evaluation using Validation Set';
+                    noticeDetail.textContent = '(Test set has no labels or is empty)';
+                } else {
+                    notice.style.display = 'block';
+                    noticeText.textContent = '📊 Evaluation using Test Set';
+                    noticeDetail.textContent = '';
+                }
+                
                 displayResults(data.results, data.task_type, data.has_test_labels);
                 
             } catch (error) {
@@ -576,7 +621,8 @@
                 metricsContainer.innerHTML = `
                     <div class="alert alert-warning">
                         <i class="fas fa-exclamation-triangle"></i>
-                        <strong>Note:</strong> Test data does not contain target column.
+                        <strong>Note:</strong> Test data does not contain target column. 
+                        Results shown are from the <strong>Validation set</strong>.
                         <br><br>
                         <strong>Number of predictions:</strong> ${results.predictions ? results.predictions.length : 0}
                     </div>
@@ -696,10 +742,13 @@
             const vizContainer = document.getElementById('visualizationContent');
             let vizHTML = '';
             
+            // Add evaluation set label to visualizations
+            const evalLabel = evalType === 'validation' ? 'Validation Set' : 'Test Set';
+            
             if (taskType === 'classification' && results.confusion_matrix_img) {
                 vizHTML = `
                     <div class="text-center">
-                        <h6>Confusion Matrix - Test Set</h6>
+                        <h6>Confusion Matrix - ${evalLabel}</h6>
                         <img src="data:image/png;base64,${results.confusion_matrix_img}" class="img-fluid rounded shadow" style="max-width: 100%;">
                     </div>
                 `;
@@ -708,13 +757,13 @@
                     <div class="row">
                         <div class="col-md-6">
                             <div class="text-center">
-                                <h6>Predictions vs Actual</h6>
+                                <h6>Predictions vs Actual - ${evalLabel}</h6>
                                 <img src="data:image/png;base64,${results.scatter_img}" class="img-fluid rounded shadow">
                             </div>
                         </div>
                         <div class="col-md-6">
                             <div class="text-center">
-                                <h6>Residual Plot</h6>
+                                <h6>Residual Plot - ${evalLabel}</h6>
                                 <img src="data:image/png;base64,${results.residuals_img}" class="img-fluid rounded shadow">
                             </div>
                         </div>
